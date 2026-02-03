@@ -14,17 +14,36 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.devpath.data.repository.ProgressRepository
+import com.google.firebase.auth.ktx.auth
+import com.google.firebase.ktx.Firebase
+import kotlinx.coroutines.launch
 
-// В LessonScreen.kt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LessonScreen(
     lessonTitle: String,
     lessonContent: String,
+    lessonId: String, // ← ДОБАВЬ ПАРАМЕТР
     onBack: () -> Unit
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    val progressRepo = remember { ProgressRepository() }
+    val currentUser = Firebase.auth.currentUser
+
+    // Автоматически отмечаем урок как пройденный при первом просмотре
+    LaunchedEffect(Unit) {
+        if (currentUser != null) {
+            coroutineScope.launch {
+                progressRepo.markLessonCompleted(currentUser.uid, lessonId)
+            }
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
