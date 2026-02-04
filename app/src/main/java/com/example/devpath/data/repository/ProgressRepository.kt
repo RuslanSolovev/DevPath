@@ -1,5 +1,6 @@
 package com.example.devpath.data.repository
 
+import com.example.devpath.domain.models.GeneralTestResult
 import com.example.devpath.domain.models.UserProgress
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -7,10 +8,16 @@ import kotlinx.coroutines.tasks.await
 class ProgressRepository(private val db: FirebaseFirestore = FirebaseFirestore.getInstance()) {
 
     suspend fun saveProgress(progress: UserProgress) {
-        db.collection("users")
-            .document(progress.userId)
-            .set(progress)
-            .await()
+        try {
+            db.collection("users")
+                .document(progress.userId)
+                .set(progress)
+                .await()
+            println("DEBUG: Прогресс сохранен для ${progress.userId}")
+        } catch (e: Exception) {
+            println("DEBUG: Ошибка сохранения прогресса: ${e.message}")
+            throw e
+        }
     }
 
     suspend fun loadProgress(userId: String): UserProgress? {
@@ -18,34 +25,70 @@ class ProgressRepository(private val db: FirebaseFirestore = FirebaseFirestore.g
             val document = db.collection("users").document(userId).get().await()
             if (document.exists()) {
                 val progress = document.toObject(UserProgress::class.java)
-                // Добавь логирование для отладки
-                println("DEBUG: Загружен прогресс для $userId: ${progress?.displayName}")
-                return progress
+                println("DEBUG: Загружен прогресс для $userId: ${progress?.completedLessons?.size} уроков")
+                progress
             } else {
-                println("DEBUG: Прогресс не найден для $userId")
-                return null
+                println("DEBUG: Прогресс не найден для $userId, создаем новый")
+                // Создаем начальный прогресс
+                val initialProgress = UserProgress.createEmpty(userId)
+                saveProgress(initialProgress)
+                initialProgress
             }
         } catch (e: Exception) {
             println("DEBUG: Ошибка загрузки прогресса: ${e.message}")
-            return null
+            null
         }
     }
 
-    suspend fun markLessonCompleted(userId: String, lessonId: String) {
+    suspend fun markLessonCompleted(userId: String, lessonId: String): Boolean {
+        return try {
+            val currentProgress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
+
+            // Избегаем дубликатов
+            val updatedLessons = if (lessonId !in currentProgress.completedLessons) {
+                currentProgress.completedLessons + lessonId
+            } else {
+                currentProgress.completedLessons
+            }
+
+            val updatedProgress = currentProgress.copy(
+                completedLessons = updatedLessons,
+                totalXP = currentProgress.totalXP + 10
+            )
+
+            saveProgress(updatedProgress)
+            println("DEBUG: Урок $lessonId отмечен как пройденный для $userId")
+            true
+        } catch (e: Exception) {
+            println("DEBUG: Ошибка отметки урока: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun isLessonCompleted(userId: String, lessonId: String): Boolean {
+        return try {
+            val progress = loadProgress(userId)
+            progress?.completedLessons?.contains(lessonId) ?: false
+        } catch (e: Exception) {
+            println("DEBUG: Ошибка проверки урока: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun saveGeneralTestResult(userId: String, result: GeneralTestResult) {
         val currentProgress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
 
-        // Избегаем дубликатов
-        val updatedLessons = if (lessonId !in currentProgress.completedLessons) {
-            currentProgress.completedLessons + lessonId
-        } else {
-            currentProgress.completedLessons
-        }
+        // Ограничиваем историю 10 последними результатами
+        val updatedHistory = (currentProgress.generalTestHistory + result)
+            .sortedByDescending { it.timestamp }
+            .take(10)
 
-        val updatedProgress = currentProgress.copy(
-            completedLessons = updatedLessons,
-            totalXP = currentProgress.totalXP + 10
-        )
+        val updatedProgress = currentProgress.copy(generalTestHistory = updatedHistory)
         saveProgress(updatedProgress)
+    }
+
+    fun getBestGeneralTestResult(history: List<GeneralTestResult>): GeneralTestResult? {
+        return history.maxByOrNull { it.percentage }
     }
 
     suspend fun markPracticeTaskCompleted(userId: String, taskId: String) {

@@ -7,10 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
-import com.example.devpath.ui.LessonListScreen
-import com.example.devpath.ui.PracticeScreen
-import com.example.devpath.ui.QuizScreen
-import com.example.devpath.ui.InterviewScreen
+import com.example.devpath.ui.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,15 +33,18 @@ fun BottomNavigationScreen(
             }
         }
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+        ) {
             when (currentTab) {
                 BottomTab.LEARNING -> {
                     LessonListScreen(onLessonClick = { lessonId ->
                         parentNavController.navigate("lesson/$lessonId")
                     })
                 }
-                BottomTab.PRACTICE -> PracticeScreen()
-                BottomTab.QUIZ -> QuizScreen()
+                BottomTab.PRACTICE -> PracticeScreen(parentNavController = parentNavController)
+                BottomTab.QUIZ -> QuizScreen(parentNavController = parentNavController)
                 BottomTab.INTERVIEW -> InterviewScreen()
             }
         }

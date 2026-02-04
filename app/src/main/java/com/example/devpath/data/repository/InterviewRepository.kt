@@ -683,7 +683,7 @@ object InterviewRepository {
                 difficulty = "intermediate"
             ),
             InterviewQuestion(
-                id = "iq26",
+                id = "iq27",
                 question = "Что такое делегаты (delegates) в Kotlin?",
                 answer = """
         **Делегаты** — это шаблон проектирования, позволяющий передать реализацию методов другому объекту.

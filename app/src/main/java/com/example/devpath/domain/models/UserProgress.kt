@@ -1,10 +1,8 @@
+// domain/models/UserProgress.kt
 package com.example.devpath.domain.models
 
-import androidx.annotation.Keep
-import com.google.firebase.firestore.IgnoreExtraProperties
+import com.google.errorprone.annotations.Keep
 
-@Keep
-@IgnoreExtraProperties
 data class UserProgress(
     val userId: String = "",
     val displayName: String = "",
@@ -13,7 +11,8 @@ data class UserProgress(
     val quizResults: Map<String, Boolean> = emptyMap(),
     val favoriteInterviewQuestions: List<String> = emptyList(),
     val totalXP: Int = 0,
-    val level: Int = 1
+    val level: Int = 1,
+    val generalTestHistory: List<GeneralTestResult> = emptyList()
 ) {
     companion object {
         fun createEmpty(userId: String): UserProgress {
@@ -25,3 +24,12 @@ data class UserProgress(
     fun hasCompletedPracticeTask(taskId: String): Boolean = taskId in completedPracticeTasks
     fun isFavoriteInterviewQuestion(questionId: String): Boolean = questionId in favoriteInterviewQuestions
 }
+
+
+@Keep
+data class GeneralTestResult(
+    val timestamp: Long = System.currentTimeMillis(),
+    val correctAnswers: Int = 0,
+    val totalQuestions: Int = 0,
+    val percentage: Int = 0
+)

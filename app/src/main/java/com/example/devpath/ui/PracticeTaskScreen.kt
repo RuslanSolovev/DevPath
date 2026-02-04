@@ -1,20 +1,33 @@
 package com.example.devpath.ui
 
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.domain.models.PracticeTask
-import com.example.devpath.ui.fffff.Green40
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
@@ -26,94 +39,484 @@ fun PracticeTaskScreen(task: PracticeTask, onBack: () -> Unit) {
     var isCorrect by remember { mutableStateOf(false) }
     var showHint by remember { mutableStateOf(false) }
     var feedbackMessage by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
     val currentUser = Firebase.auth.currentUser
     val coroutineScope = rememberCoroutineScope()
     val progressRepo = remember { ProgressRepository() }
+    val clipboardManager = LocalClipboardManager.current
+
+    val difficultyColor = when (task.difficulty) {
+        "beginner" -> Color(0xFF10B981)
+        "intermediate" -> Color(0xFFF59E0B)
+        "advanced" -> Color(0xFFEF4444)
+        else -> MaterialTheme.colorScheme.primary
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(task.title) },
+            CenterAlignedTopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            task.title,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(difficultyColor.copy(alpha = 0.1f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                when (task.difficulty) {
+                                    "beginner" -> "Начальный уровень"
+                                    "intermediate" -> "Средний уровень"
+                                    "advanced" -> "Продвинутый уровень"
+                                    else -> "Начальный"
+                                },
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = difficultyColor
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Назад",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
+                ),
+                actions = {
+                    IconButton(
+                        onClick = { userCode = task.starterCode },
+                        enabled = userCode != task.starterCode
+                    ) {
+                        Icon(
+                            Icons.Rounded.RestartAlt,
+                            contentDescription = "Сбросить код",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-        ) {
-            Text(
-                text = task.description,
-                style = MaterialTheme.typography.bodyLarge
-            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = {
+                    if (userCode.isNotBlank() && !isLoading) {
+                        isLoading = true
+                        feedbackMessage = ""
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Редактор кода
-            OutlinedTextField(
-                value = userCode,
-                onValueChange = { userCode = it },
-                label = { Text("Ваш код") },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .weight(1f),
-                maxLines = 15
-            )
-
-            if (showHint) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Подсказка: ${task.hint}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            if (feedbackMessage.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = feedbackMessage,
-                    color = if (isCorrect) Green40 else MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row {
-                // В PracticeTaskScreen.kt
-                Button(
-                    onClick = {
                         val result = checkSolution(task.id, userCode)
                         isCorrect = result.isCorrect
                         feedbackMessage = result.message
 
-                        // Сохраняем прогресс
                         if (result.isCorrect && currentUser != null) {
                             coroutineScope.launch {
                                 progressRepo.markPracticeTaskCompleted(currentUser.uid, task.id)
+                                isLoading = false
+                            }
+                        } else {
+                            isLoading = false
+                        }
+                    }
+                },
+                icon = {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(
+                            if (isCorrect) Icons.Default.DoneAll else Icons.Default.PlayArrow,
+                            contentDescription = if (isCorrect) "Задание пройдено" else "Проверить решение"
+                        )
+                    }
+                },
+                text = {
+                    Text(
+                        when {
+                            isLoading -> "Проверка..."
+                            isCorrect -> "Задание пройдено!"
+                            else -> "Проверить решение"
+                        }
+                    )
+                },
+                containerColor = if (isCorrect)
+                    MaterialTheme.colorScheme.secondary
+                else
+                    MaterialTheme.colorScheme.primary,
+                contentColor = if (isCorrect)
+                    MaterialTheme.colorScheme.onSecondary
+                else
+                    MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.alpha(
+                    if (isLoading || userCode.isBlank()) 0.5f else 1f
+                )
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                // Карточка с описанием задания
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(difficultyColor.copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Description,
+                                    contentDescription = "Описание",
+                                    tint = difficultyColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Text(
+                                "Описание задания",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Используем FormattedLessonContent для форматированного текста
+                        FormattedLessonContent(
+                            content = task.description,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
+            item {
+                // Редактор кода (без дублирования)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(30.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Edit,
+                                    contentDescription = "Код",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    "Редактор кода",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Countertops,
+                                    contentDescription = "Строки",
+                                    modifier = Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    "${userCode.lines().size} строк",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
-                    },
-                    enabled = userCode.isNotBlank()
+
+
+                        Text(
+                            "👇 Редактируйте код ниже:",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Medium
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+
+                        // Редактор кода пользователя с подсветкой синтаксиса
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 200.dp, max = 400.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E1E1E),
+                            tonalElevation = 2.dp
+                        ) {
+                            BasicTextField(
+                                value = userCode,
+                                onValueChange = { userCode = it },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = Color.Transparent, // Делаем текст невидимым
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp
+                                ),
+                                maxLines = Int.MAX_VALUE,
+                                decorationBox = { innerTextField ->
+                                    // Показываем подсвеченный код
+                                    val highlightedCode = remember(userCode) {
+                                        buildAnnotatedString {
+                                            userCode.lines().forEachIndexed { index, line ->
+                                                val highlightedLine = highlightKotlinSyntax(line)
+                                                append(highlightedLine)
+                                                if (index < userCode.lines().lastIndex) {
+                                                    append("\n")
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Отображаем подсвеченный код
+                                    Text(
+                                        text = highlightedCode,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
+                                    )
+
+                                    // Отрисовываем невидимое текстовое поле поверх
+                                    innerTextField()
+                                }
+                            )
+                        }
+
+                        Text(
+                            "💡 Совет: Изменяйте код и экспериментируйте!",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontStyle = FontStyle.Italic
+                        )
+                    }
+                }
+            }
+
+            item {
+                // Кнопки действий
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("Проверить")
-                }
+                    OutlinedButton(
+                        onClick = {
+                            showHint = !showHint
+                            if (showHint) feedbackMessage = ""
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                if (showHint) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                contentDescription = "Подсказка",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(if (showHint) "Скрыть подсказку" else "Показать подсказку")
+                        }
+                    }
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                OutlinedButton(onClick = {
-                    showHint = !showHint
-                    feedbackMessage = "" // Очищаем предыдущий фидбек
-                }) {
-                    Text(if (showHint) "Скрыть подсказку" else "Показать подсказку")
+                    OutlinedButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(userCode))
+                            // Можно добавить Snackbar для подтверждения копирования
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.tertiary
+                        )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.ContentCopy,
+                                contentDescription = "Копировать",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text("Копировать код")
+                        }
+                    }
                 }
+            }
+
+            if (showHint || feedbackMessage.isNotEmpty()) {
+                item {
+                    // Подсказка или результат проверки
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isCorrect)
+                                MaterialTheme.colorScheme.secondaryContainer
+                            else if (feedbackMessage.isNotEmpty() && !isCorrect)
+                                MaterialTheme.colorScheme.errorContainer
+                            else
+                                MaterialTheme.colorScheme.tertiaryContainer
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isCorrect)
+                                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                                            else if (feedbackMessage.isNotEmpty() && !isCorrect)
+                                                MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
+                                            else
+                                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        when {
+                                            isCorrect -> Icons.Rounded.CheckCircle
+                                            feedbackMessage.isNotEmpty() && !isCorrect -> Icons.Rounded.Error
+                                            showHint -> Icons.Rounded.Lightbulb
+                                            else -> Icons.Rounded.Info
+                                        },
+                                        contentDescription = "Информация",
+                                        tint = if (isCorrect)
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        else if (feedbackMessage.isNotEmpty() && !isCorrect)
+                                            MaterialTheme.colorScheme.onErrorContainer
+                                        else
+                                            MaterialTheme.colorScheme.onTertiaryContainer,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        when {
+                                            isCorrect -> "Поздравляем!"
+                                            feedbackMessage.isNotEmpty() && !isCorrect -> "Есть ошибки"
+                                            showHint -> "Подсказка"
+                                            else -> "Информация"
+                                        },
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = if (isCorrect)
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        else if (feedbackMessage.isNotEmpty() && !isCorrect)
+                                            MaterialTheme.colorScheme.onErrorContainer
+                                        else
+                                            MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                            }
+
+                            // Используем FormattedLessonContent для форматирования подсказки
+                            if (showHint && feedbackMessage.isEmpty()) {
+                                FormattedLessonContent(
+                                    content = task.hint,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            } else {
+                                Text(
+                                    text = feedbackMessage,
+                                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                                    color = if (isCorrect)
+                                        MaterialTheme.colorScheme.onSecondaryContainer
+                                    else if (feedbackMessage.isNotEmpty() && !isCorrect)
+                                        MaterialTheme.colorScheme.onErrorContainer
+                                    else
+                                        MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(80.dp))
             }
         }
     }
