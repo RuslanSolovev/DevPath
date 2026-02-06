@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -21,28 +20,35 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.devpath.data.repository.LessonRepository
-import com.example.devpath.data.repository.ProgressRepository
+import com.example.devpath.data.repository.PracticeRepository
+import com.example.devpath.data.repository.QuizRepository
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LessonScreen(
     lessonTitle: String,
     lessonContent: String,
     lessonId: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToPractice: (String) -> Unit = {},
+    onNavigateToQuiz: (String) -> Unit = {},
+    onNavigateToGeneralTest: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
-
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
     val currentUser = Firebase.auth.currentUser
 
     val lesson = LessonRepository.getLessonById(lessonId) ?: LessonRepository.getLessons().first()
+
+    // Получаем практику и тесты по теме урока
+    val practiceTasks = PracticeRepository.getTasksByTopic(lesson.topic)
+    val quizQuestions = QuizRepository.getQuestionsByTopic(lesson.topic)
 
     // Состояние для отслеживания завершения урока
     var isMarkedAsCompleted by remember { mutableStateOf(false) }
@@ -139,7 +145,6 @@ fun LessonScreen(
                     MaterialTheme.colorScheme.onSecondary
                 else
                     MaterialTheme.colorScheme.onPrimary,
-                // Удален параметр enabled
             )
         }
     ) { paddingValues ->
@@ -175,9 +180,26 @@ fun LessonScreen(
                 LessonTips()
             }
 
-            // Действия
-            item {
-                LessonActions()
+            // Рекомендации по теме
+            if (practiceTasks.isNotEmpty() || quizQuestions.isNotEmpty()) {
+                item {
+                    SequentialLearningPath(
+                        lessonTopic = lesson.topic,
+                        practiceTasks = practiceTasks,
+                        quizQuestions = quizQuestions,
+                        onPracticeClick = { taskId ->
+                            if (practiceTasks.isNotEmpty()) {
+                                onNavigateToPractice(taskId)
+                            }
+                        },
+                        onQuizClick = { questionId ->
+                            if (quizQuestions.isNotEmpty()) {
+                                onNavigateToQuiz(questionId)
+                            }
+                        },
+                        onGeneralTestClick = onNavigateToGeneralTest
+                    )
+                }
             }
         }
     }
@@ -454,60 +476,6 @@ private fun LessonTips() {
     }
 }
 
-@Composable
-private fun LessonActions() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Кнопка практики
-        OutlinedButton(
-            onClick = { /* TODO: Переход к практике по теме */ },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = MaterialTheme.colorScheme.primary
-            )
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    Icons.Rounded.PlayArrow,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text("Попробовать")
-            }
-        }
-
-        // Кнопка следующего урока
-        Button(
-            onClick = { /* TODO: Следующий урок */ },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            )
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("Далее")
-                Icon(
-                    Icons.Default.ArrowForward,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
-
 // Добавьте в конец LessonScreen.kt (для отладки и предпросмотра)
 @Preview(showBackground = true)
 @Composable
@@ -544,7 +512,10 @@ fun LessonScreenPreview() {
                 ```
             """.trimIndent(),
             lessonId = "kotlin_basics",
-            onBack = {}
+            onBack = {},
+            onNavigateToPractice = {},
+            onNavigateToQuiz = {},
+            onNavigateToGeneralTest = {}
         )
     }
 }

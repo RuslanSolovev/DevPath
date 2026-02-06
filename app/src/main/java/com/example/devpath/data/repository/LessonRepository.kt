@@ -80,7 +80,8 @@ object LessonRepository {
                         version = 2.0
                         println("Новая версия: " + version)
                     }
-                """.trimIndent()
+                """.trimIndent(),
+                topic = "kotlin_basics"
             ),
             Lesson(
                 id = "variables_types",
@@ -211,7 +212,8 @@ val multiLine = ""${'"'}
                         println("Цена: " + price)
                         println("Температура: " + temperature + "°C")
                     }
-                """.trimIndent()
+                """.trimIndent(),
+                topic = "kotlin_basics"
             ),
             Lesson(
                 id = "functions",
@@ -390,7 +392,8 @@ val multiLine = ""${'"'}
                     fun factorial(n: Int): Long {
                         return if (n <= 1) 1 else n * factorial(n - 1)
                     }
-                """.trimIndent()
+                """.trimIndent(),
+                topic = "functions"
             ),
             Lesson(
                 id = "control_flow",
@@ -593,7 +596,8 @@ val multiLine = ""${'"'}
                     
                     fun Int.isEven() = this % 2 == 0
                     fun Int.isOdd() = !this.isEven()
-                """.trimIndent()
+                """.trimIndent(),
+                topic = "control_flow"
             ),
             Lesson(
                 id = "collections",
@@ -841,7 +845,8 @@ val multiLine = ""${'"'}
                         println("
     Результат работы с последовательностью: " + sequenceResult)
                     }
-                """.trimIndent()
+                """.trimIndent(),
+                topic = "collections"
             ),
             Lesson(
                 id = "oop_kotlin",
@@ -1245,7 +1250,8 @@ val multiLine = ""${'"'}
                                 }
                             }
                     }
-                """.trimIndent()
+                """.trimIndent(),
+                topic = "classes"
             )
         )
     }

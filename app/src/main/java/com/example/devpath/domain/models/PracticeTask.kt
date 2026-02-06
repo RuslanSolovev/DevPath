@@ -8,5 +8,6 @@ data class PracticeTask (
     val starterCode: String,
     val solution: String,
     val hint: String = "",
-    val difficulty: String = "beginner" // beginner, intermediate, advanced
+    val difficulty: String = "beginner",
+    val topic: String = "kotlin_basics"// beginner, intermediate, advanced
 )

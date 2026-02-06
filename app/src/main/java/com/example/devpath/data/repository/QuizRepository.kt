@@ -233,6 +233,10 @@ object QuizRepository {
         )
     }
 
+    fun getQuestionsByTopic(topic: String): List<QuizQuestion> {
+        return getQuizQuestions().filter { it.topic == topic }
+    }
+
     fun getQuestionById(id: String): QuizQuestion? {
         return getQuizQuestions().find { it.id == id }
     }

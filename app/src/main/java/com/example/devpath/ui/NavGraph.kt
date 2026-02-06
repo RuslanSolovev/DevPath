@@ -113,7 +113,16 @@ fun DevPathNavGraph() {
                 lessonTitle = lesson.title,
                 lessonContent = lesson.theory,
                 lessonId = lessonId,
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                onNavigateToPractice = { taskId ->
+                    navController.navigate("practice/$taskId")
+                },
+                onNavigateToQuiz = { questionId ->
+                    navController.navigate("quiz/question/$questionId")
+                },
+                onNavigateToGeneralTest = {
+                    navController.navigate("quiz/general_test")
+                }
             )
         }
 
@@ -155,7 +164,7 @@ fun DevPathNavGraph() {
             val testViewModel: ProgressViewModel = hiltViewModel()
 
             GeneralTestScreenWithResultSaver(
-                viewModel = testViewModel, // <-- Передаем ViewModel как параметр
+                viewModel = testViewModel,
                 questions = randomQuestions,
                 currentUserId = currentUser?.uid,
                 onTestComplete = { quizResult ->
@@ -199,7 +208,7 @@ fun DevPathNavGraph() {
 
 @Composable
 fun GeneralTestScreenWithResultSaver(
-    viewModel: ProgressViewModel, // <-- Принимаем ViewModel как параметр
+    viewModel: ProgressViewModel,
     questions: List<com.example.devpath.domain.models.QuizQuestion>,
     currentUserId: String?,
     onTestComplete: (com.example.devpath.domain.models.QuizResult) -> Unit,

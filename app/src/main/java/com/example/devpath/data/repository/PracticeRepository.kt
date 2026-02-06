@@ -13,7 +13,8 @@ object PracticeRepository {
     // Ваш код здесь
 }""".trimIndent(),
                 solution = "", // Не используется при гибкой проверке
-                hint = "Используйте: println(\"Hello, DevPath!\")"
+                hint = "Используйте: println(\"Hello, DevPath!\")",
+                topic = "kotlin_basics"
             ),
             PracticeTask(
                 id = "variables_sum",
@@ -23,7 +24,8 @@ object PracticeRepository {
     // Объявите переменные и выведите сумму
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: val a = 5, val b = 10, println(a + b)"
+                hint = "Используйте: val a = 5, val b = 10, println(a + b)",
+                topic = "kotlin_basics"
             ),
             PracticeTask(
                 id = "conditional_if",
@@ -34,7 +36,8 @@ object PracticeRepository {
     // Используйте if-else для проверки чётности
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: if (number % 2 == 0) { ... } else { ... }"
+                hint = "Используйте: if (number % 2 == 0) { ... } else { ... }",
+                topic = "control_flow"
             ),
             PracticeTask(
                 id = "for_loop",
@@ -44,7 +47,8 @@ object PracticeRepository {
     // Используйте цикл for для вывода чисел 1-5
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: for (i in 1..5) { println(i) }"
+                hint = "Используйте: for (i in 1..5) { println(i) }",
+                topic = "loops"
             ),
             PracticeTask(
                 id = "while_loop",
@@ -54,7 +58,8 @@ object PracticeRepository {
     // Используйте цикл while для вывода чисел 1-5
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: var counter = 1; while (counter <= 5) { println(counter); counter++ }"
+                hint = "Используйте: var counter = 1; while (counter <= 5) { println(counter); counter++ }",
+                topic = "loops"
             ),
             PracticeTask(
                 id = "function_basic",
@@ -66,7 +71,8 @@ object PracticeRepository {
 
 // Объявите функцию multiply здесь""".trimIndent(),
                 solution = "",
-                hint = "Используйте: fun multiply(a: Int, b: Int): Int { return a * b }"
+                hint = "Используйте: fun multiply(a: Int, b: Int): Int { return a * b }",
+                topic = "functions"
             ),
             PracticeTask(
                 id = "list_operations",
@@ -76,7 +82,8 @@ object PracticeRepository {
     // Создайте список и переберите его элементы
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: val list = listOf(1, 2, 3, 4, 5); list.forEach { println(it) }"
+                hint = "Используйте: val list = listOf(1, 2, 3, 4, 5); list.forEach { println(it) }",
+                topic = "collections"
             ),
             PracticeTask(
                 id = "string_template",
@@ -87,7 +94,8 @@ object PracticeRepository {
     // Используйте шаблон строки для вывода
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: val name = \"Имя\"; val age = 25; println(\"Меня зовут \$name, мне \$age лет\")"
+                hint = "Используйте: val name = \"Имя\"; val age = 25; println(\"Меня зовут \$name, мне \$age лет\")",
+                topic = "strings"
             ),
             PracticeTask(
                 id = "null_safety",
@@ -97,7 +105,8 @@ object PracticeRepository {
     // Создайте nullable переменную и обработайте null
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: val name: String? = null; val result = name ?: \"Гость\"; println(result)"
+                hint = "Используйте: val name: String? = null; val result = name ?: \"Гость\"; println(result)",
+                topic = "null_safety"
             ),
             PracticeTask(
                 id = "when_expression",
@@ -108,9 +117,14 @@ object PracticeRepository {
     // Используйте when для определения качества оценки
 }""".trimIndent(),
                 solution = "",
-                hint = "Используйте: val grade = \"A\"; when (grade) { \"A\" -> println(\"Отлично\") \"B\" -> println(\"Хорошо\") else -> println(\"Удовлетворительно\") }"
+                hint = "Используйте: val grade = \"A\"; when (grade) { \"A\" -> println(\"Отлично\") \"B\" -> println(\"Хорошо\") else -> println(\"Удовлетворительно\") }",
+                topic = "control_flow"
             )
         )
+    }
+
+    fun getTasksByTopic(topic: String): List<PracticeTask> {
+        return getPracticeTasks().filter { it.topic == topic }
     }
 
     fun getTaskById(id: String): PracticeTask? {

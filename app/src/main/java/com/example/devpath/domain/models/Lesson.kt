@@ -10,7 +10,8 @@ data class Lesson(
     val duration: Int = 15, // Дефолтное значение
     val difficulty: String = "beginner", // Дефолтное значение
     val isCompleted: Boolean = false, // Это поле теперь будет вычисляться из прогресса
-    val order: Int = 0
+    val order: Int = 0,
+    val topic: String = "kotlin_basics"
 ) {
     companion object {
         // Можно добавить вспомогательные методы
