@@ -29,6 +29,9 @@ import com.example.devpath.domain.models.QuizQuestion
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.devpath.ui.viewmodel.ProgressViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,7 +42,11 @@ fun QuizQuestionScreen(question: QuizQuestion, onBack: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     val currentUser = Firebase.auth.currentUser
     val coroutineScope = rememberCoroutineScope()
-    val progressRepo = remember { ProgressRepository() }
+
+
+
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
 
     val topicColor = when (question.topic) {
         "kotlin_basics" -> Color(0xFF6366F1)

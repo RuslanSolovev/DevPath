@@ -22,7 +22,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -30,18 +29,17 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.example.devpath.data.repository.ProgressRepository
+import com.example.devpath.data.repository.LocalThemeRepository
 import com.example.devpath.ui.theme.AppTheme
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
-import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.text.style.TextOverflow
-import com.example.devpath.data.repository.LocalThemeRepository
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -54,13 +52,17 @@ fun DashboardScreen(
     onNavigateToInterview: () -> Unit = {}
 ) {
     val currentUser = Firebase.auth.currentUser
-    val progressRepo = remember { ProgressRepository() }
+
+    // ✅ ИСПРАВЛЯЕМ: Используем hiltViewModel()
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
 
     var displayName by remember { mutableStateOf("") }
     var totalXP by remember { mutableStateOf(0) }
     var level by remember { mutableStateOf(1) }
     var shouldShowProfile by remember { mutableStateOf(false) }
     var userPhotoUrl by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
 
     // Анимация прогресса
     val progressAnimation = remember { Animatable(0f) }
@@ -78,7 +80,7 @@ fun DashboardScreen(
 
     val coroutineScope = rememberCoroutineScope()
 
-    // Мотивационные фразы для колокольчика
+    // Мотивационные фразы
     val motivationalPhrases = remember {
         listOf(
             "Каждый день - шаг к мастерству! 🚀",
@@ -102,50 +104,83 @@ fun DashboardScreen(
     var currentMotivationalPhrase by remember { mutableStateOf(motivationalPhrases.random()) }
     var showMotivationalToast by remember { mutableStateOf(false) }
 
+    // ✅ ОПТИМИЗИРОВАННАЯ ЗАГРУЗКА: Загружаем только один раз при первом запуске
     LaunchedEffect(Unit) {
         if (currentUser != null) {
+            isLoading = true
             try {
-                val progress = progressRepo.loadProgress(currentUser.uid)
-                if (progress != null) {
-                    displayName = progress.displayName ?: ""
-                    totalXP = progress.totalXP
+                // 1. Сначала быстрая загрузка локальных данных
+                val localProgress = progressRepo.loadLocalProgress(currentUser.uid)
 
-                    // 🔥 ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ:
-                    val calculatedLevel = calculateLevel(totalXP)
-                    level = calculatedLevel
-
-                    // Если уровень изменился, сохраняем его в Firestore
-                    if (calculatedLevel != progress.level) {
-                        coroutineScope.launch {
-                            val updatedProgress = progress.copy(level = calculatedLevel)
-                            progressRepo.saveProgress(updatedProgress)
-                        }
-                    }
-
+                if (localProgress != null) {
+                    // Мгновенно обновляем UI с локальными данными
+                    displayName = localProgress.displayName ?: currentUser.displayName ?: "Гость"
+                    totalXP = localProgress.totalXP
+                    level = calculateLevel(localProgress.totalXP)
                     userPhotoUrl = currentUser.photoUrl?.toString()
 
-                    // Запускаем анимацию прогресса
-                    val progressPercent = (totalXP % 100) / 100f
+                    // Анимация прогресса
+                    val progressPercent = (localProgress.totalXP % 100) / 100f
                     progressAnimation.animateTo(
                         targetValue = progressPercent,
-                        animationSpec = tween(1000, easing = LinearEasing)
+                        animationSpec = tween(800, easing = LinearEasing)
                     )
 
-                    if (displayName.isBlank()) {
+                    if (localProgress.displayName.isNullOrBlank()) {
                         shouldShowProfile = true
                     }
                 } else {
+                    // Если локальных данных нет, показываем пустые значения
+                    displayName = currentUser.displayName ?: "Гость"
                     shouldShowProfile = true
+                }
+
+                // 2. В фоне загружаем полные данные (с синхронизацией Firebase)
+                coroutineScope.launch {
+                    val fullProgress = progressRepo.loadProgress(currentUser.uid)
+                    fullProgress?.let { progress ->
+                        displayName = progress.displayName ?: currentUser.displayName ?: "Гость"
+                        totalXP = progress.totalXP
+
+                        val calculatedLevel = calculateLevel(progress.totalXP)
+                        level = calculatedLevel
+
+                        // Если уровень изменился, сохраняем
+                        if (calculatedLevel != progress.level) {
+                            progressRepo.saveProgress(progress.copy(level = calculatedLevel))
+                        }
+
+                        // Обновляем анимацию
+                        val progressPercent = (progress.totalXP % 100) / 100f
+                        progressAnimation.animateTo(
+                            targetValue = progressPercent,
+                            animationSpec = tween(800, easing = LinearEasing)
+                        )
+
+                        if (progress.displayName.isNullOrBlank()) {
+                            shouldShowProfile = true
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 println("DEBUG: Ошибка в Dashboard: ${e.message}")
+                // В случае ошибки используем минимальные данные
+                displayName = currentUser.displayName ?: "Гость"
+            } finally {
+                isLoading = false
             }
+        } else {
+            isLoading = false
+            // Если пользователь не авторизован, показываем гостевой режим
+            displayName = "Гость"
         }
     }
 
     // Автоматический переход к профилю
     if (shouldShowProfile) {
-        onNavigateToProfile()
+        LaunchedEffect(Unit) {
+            onNavigateToProfile()
+        }
         return
     }
 
@@ -167,14 +202,12 @@ fun DashboardScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            // Используем SmallTopAppBar для правильного отступа от системной панели
             SmallTopAppBar(
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Приветствие пользователя
                         Column {
                             Text(
                                 "Привет,",
@@ -182,7 +215,7 @@ fun DashboardScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                if (displayName.isNotBlank()) displayName else "Гость",
+                                displayName,
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
@@ -218,12 +251,19 @@ fun DashboardScreen(
                                     .clip(CircleShape),
                                 contentScale = ContentScale.Crop
                             )
-                        } else {
+                        } else if (!isLoading) {
                             Text(
                                 displayName.take(2).uppercase(),
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Bold
                                 ),
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            // Индикатор загрузки
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(24.dp),
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
                         }
@@ -265,322 +305,342 @@ fun DashboardScreen(
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                item {
-                    Spacer(modifier = Modifier.height(4.dp))
+            if (isLoading) {
+                // Индикатор загрузки
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(48.dp),
+                        strokeWidth = 3.dp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "Загружаем ваш прогресс...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
 
-                // Мотивационная фраза (появляется после нажатия на колокольчик)
-                if (showMotivationalToast) {
+                    // Мотивационная фраза (появляется после нажатия на колокольчик)
+                    if (showMotivationalToast) {
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Lightbulb,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Text(
+                                        currentMotivationalPhrase,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = { showMotivationalToast = false },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Закрыть",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Карточка прогресса
                     item {
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
-                            border = BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)
-                            )
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp,
+                            shadowElevation = 2.dp
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    .padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Icon(
-                                    Icons.Default.Lightbulb,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Text(
-                                    currentMotivationalPhrase,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(
-                                    onClick = { showMotivationalToast = false },
-                                    modifier = Modifier.size(24.dp)
+                                // Круглый прогресс с градиентом
+                                Box(
+                                    modifier = Modifier.size(160.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Закрыть",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
+                                    // Фон круга
+                                    CircularProgressIndicator(
+                                        progress = 1f,
+                                        modifier = Modifier.size(160.dp),
+                                        strokeWidth = 12.dp,
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                    )
+
+                                    // Анимированный прогресс
+                                    CircularProgressIndicator(
+                                        progress = progressAnimation.value,
+                                        modifier = Modifier.size(160.dp),
+                                        strokeWidth = 12.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        trackColor = Color.Transparent
+                                    )
+
+                                    // Внутренний круг
+                                    Box(
+                                        modifier = Modifier
+                                            .size(120.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.radialGradient(
+                                                    colors = listOf(
+                                                        MaterialTheme.colorScheme.primaryContainer,
+                                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                                    )
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                animatedLevel.toInt().toString(),
+                                                style = MaterialTheme.typography.displayLarge.copy(
+                                                    fontSize = 48.sp,
+                                                    fontWeight = FontWeight.ExtraBold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                            Text(
+                                                "Уровень",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                // XP и прогресс
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                ) {
+                                    StatItem(
+                                        value = "$totalXP",
+                                        label = "Всего XP",
+                                        icon = Icons.Filled.Star,
+                                        gradient = primaryGradient
+                                    )
+                                    StatItem(
+                                        value = "${totalXP % 100}/100",
+                                        label = "До след. уровня",
+                                        icon = Icons.Filled.TrendingUp,
+                                        gradient = secondaryGradient
                                     )
                                 }
                             }
                         }
                     }
-                }
 
-                // Карточка прогресса
-                item {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 2.dp,
-                        shadowElevation = 2.dp
-                    ) {
+                    // Рекомендуемые модули
+                    item {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         ) {
-                            // Круглый прогресс с градиентом
-                            Box(
-                                modifier = Modifier.size(160.dp),
-                                contentAlignment = Alignment.Center
+                            Text(
+                                "Рекомендуемые модули",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                // Фон круга
-                                CircularProgressIndicator(
-                                    progress = 1f,
-                                    modifier = Modifier.size(160.dp),
-                                    strokeWidth = 12.dp,
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                )
+                                items(recommendedModules) { module ->
+                                    RecommendedModuleCard(
+                                        module = module,
+                                        onClick = {
+                                            when (module.id) {
+                                                "practice" -> onNavigateToPractice()
+                                                "quiz" -> onNavigateToQuiz()
+                                                "interview" -> onNavigateToInterview()
+                                                "full_course" -> onNavigateToTabs()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                                // Анимированный прогресс
-                                CircularProgressIndicator(
-                                    progress = progressAnimation.value,
-                                    modifier = Modifier.size(160.dp),
-                                    strokeWidth = 12.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    trackColor = Color.Transparent
-                                )
+                    // Ежедневная цель
+                    item {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Text(
+                                "Ежедневная цель",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
 
-                                // Внутренний круг
-                                Box(
-                                    modifier = Modifier
-                                        .size(120.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            Brush.radialGradient(
-                                                colors = listOf(
-                                                    MaterialTheme.colorScheme.primaryContainer,
-                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                                )
-                                            )
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text(
-                                            animatedLevel.toInt().toString(),
-                                            style = MaterialTheme.typography.displayLarge.copy(
-                                                fontSize = 48.sp,
-                                                fontWeight = FontWeight.ExtraBold
-                                            ),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                        Text(
-                                            "Уровень",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                        )
-                                    }
+                            DailyGoalCard(
+                                completed = 0,
+                                total = 5,
+                                onComplete = { /* TODO */ }
+                            )
+                        }
+                    }
+
+                    // Путь обучения
+                    item {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Ваш путь обучения",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                                TextButton(onClick = onNavigateToTabs) {
+                                    Text("Смотреть все")
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(24.dp))
-
-                            // XP и прогресс
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly
-                            ) {
-                                StatItem(
-                                    value = "$totalXP",
-                                    label = "Всего XP",
-                                    icon = Icons.Filled.Star,
-                                    gradient = primaryGradient
-                                )
-                                StatItem(
-                                    value = "${totalXP % 100}/100",
-                                    label = "До след. уровня",
-                                    icon = Icons.Filled.TrendingUp,
-                                    gradient = secondaryGradient
-                                )
-                            }
+                            LearningPathCard(
+                                title = "Kotlin для начинающих",
+                                description = "Основы программирования на Kotlin",
+                                progress = 0.0f,
+                                duration = "8 часов",
+                                lessonsCompleted = 0,
+                                totalLessons = 25,
+                                onClick = onNavigateToTabs
+                            )
                         }
                     }
-                }
 
-                // Рекомендуемые модули (вместо быстрых действий)
-                item {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    ) {
-                        Text(
-                            "Рекомендуемые модули",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-
-                        LazyRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(recommendedModules) { module ->
-                                RecommendedModuleCard(
-                                    module = module,
-                                    onClick = {
-                                        when (module.id) {
-                                            "practice" -> onNavigateToPractice() // Открываем вкладку практики
-                                            "quiz" -> onNavigateToQuiz()        // Открываем вкладку тестов
-                                            "interview" -> onNavigateToInterview() // Открываем вкладку собеседований
-                                            "full_course" -> onNavigateToTabs()   // Открываем все вкладки
-                                        }
-                                    }
-
-
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Ежедневная цель
-                item {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    ) {
-                        Text(
-                            "Ежедневная цель",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-
-                        DailyGoalCard(
-                            completed = 3,
-                            total = 5,
-                            onComplete = { /* TODO: Отметить выполнение */ }
-                        )
-                    }
-                }
-
-                // Путь обучения
-                item {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                    // Достижения
+                    item {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         ) {
                             Text(
-                                "Ваш путь обучения",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                                "Ваши достижения",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            TextButton(onClick = onNavigateToTabs) {
-                                Text("Смотреть все")
-                            }
-                        }
 
-                        LearningPathCard(
-                            title = "Kotlin для начинающих",
-                            description = "Основы программирования на Kotlin",
-                            progress = 0.65f,
-                            duration = "8 часов",
-                            lessonsCompleted = 15,
-                            totalLessons = 25,
-                            onClick = onNavigateToTabs
-                        )
-                    }
-                }
-
-                // Достижения
-                item {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    ) {
-                        Text(
-                            "Ваши достижения",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-
-                        LazyRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(achievements) { achievement ->
-                                AchievementBadge(
-                                    achievement = achievement,
-                                    onClick = { /* TODO: Открыть детали достижения */ }
-                                )
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(achievements) { achievement ->
+                                    AchievementBadge(
+                                        achievement = achievement,
+                                        onClick = { /* TODO */ }
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                // Статистика
-                item {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 2.dp
-                    ) {
-                        Column(
+                    // Статистика
+                    item {
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(20.dp)
+                                .padding(horizontal = 16.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp
                         ) {
-                            Text(
-                                "Статистика за неделю",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp)
                             ) {
-                                StatCard(
-                                    value = "12",
-                                    label = "Пройдено уроков",
-                                    icon = Icons.Rounded.MenuBook,
-                                    color = MaterialTheme.colorScheme.primary
+                                Text(
+                                    "Статистика за неделю",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    modifier = Modifier.padding(bottom = 16.dp)
                                 )
-                                StatCard(
-                                    value = "8",
-                                    label = "Правильных ответов",
-                                    icon = Icons.Rounded.CheckCircle,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                                StatCard(
-                                    value = "5",
-                                    label = "Новых навыков",
-                                    icon = Icons.Rounded.AutoAwesome,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    StatCard(
+                                        value = "0",
+                                        label = "Пройдено уроков",
+                                        icon = Icons.Rounded.MenuBook,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    StatCard(
+                                        value = "0",
+                                        label = "Правильных ответов",
+                                        icon = Icons.Rounded.CheckCircle,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                    StatCard(
+                                        value = "0",
+                                        label = "Новых навыков",
+                                        icon = Icons.Rounded.AutoAwesome,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                item {
-                    Spacer(modifier = Modifier.height(80.dp))
+                    item {
+                        Spacer(modifier = Modifier.height(80.dp))
+                    }
                 }
             }
         }
@@ -715,7 +775,7 @@ fun StatItem(
     }
 }
 
-// Новые компоненты
+// Остальные компоненты остаются без изменений...
 
 data class RecommendedModule(
     val id: String,
@@ -731,28 +791,28 @@ val recommendedModules = listOf(
         title = "Практика",
         description = "Решайте задачи",
         icon = Icons.Rounded.Code,
-        color = Color(0xFF6366F1) // Индиго
+        color = Color(0xFF6366F1)
     ),
     RecommendedModule(
         id = "quiz",
         title = "Тесты",
         description = "Проверьте знания",
         icon = Icons.Rounded.Quiz,
-        color = Color(0xFF10B981) // Изумрудный
+        color = Color(0xFF10B981)
     ),
     RecommendedModule(
         id = "interview",
         title = "Собеседование",
         description = "Подготовка к собесу",
         icon = Icons.Rounded.WorkspacePremium,
-        color = Color(0xFFF59E0B) // Янтарный
+        color = Color(0xFFF59E0B)
     ),
     RecommendedModule(
         id = "full_course",
         title = "Полный курс",
         description = "Все уроки",
         icon = Icons.Rounded.School,
-        color = Color(0xFF8B5CF6) // Фиолетовый
+        color = Color(0xFF8B5CF6)
     )
 )
 
@@ -867,7 +927,6 @@ fun DailyGoalCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Прогресс бар
             LinearProgressIndicator(
                 progress = progress,
                 modifier = Modifier
@@ -913,9 +972,9 @@ fun LearningPathCard(
         modifier = Modifier
             .fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh, // 👈 Специальный цвет для карточек
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         onClick = onClick,
-        tonalElevation = 3.dp, // 👈 Увеличиваем тень
+        tonalElevation = 3.dp,
         shadowElevation = 4.dp
     ) {
         Column(
@@ -973,7 +1032,6 @@ fun LearningPathCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Информация о курсе
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -992,7 +1050,6 @@ fun LearningPathCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Прогресс бар
             LinearProgressIndicator(
                 progress = progress,
                 modifier = Modifier
@@ -1069,14 +1126,14 @@ val achievements = listOf(
         title = "Первый код",
         description = "Напишите первую программу",
         icon = Icons.Rounded.Code,
-        achieved = true,
+        achieved = false,
         xpReward = 50
     ),
     Achievement(
         title = "Ученик",
         description = "Пройдите 10 уроков",
         icon = Icons.Rounded.School,
-        achieved = true,
+        achieved = false,
         xpReward = 100
     ),
     Achievement(
@@ -1215,7 +1272,6 @@ fun calculateLevel(totalXP: Int): Int {
     if (totalXP < 700) return 4
     if (totalXP < 1000) return 5
 
-    // Общая формула для больших значений
     var xp = totalXP
     var level = 1
     var xpForNextLevel = 100
@@ -1223,7 +1279,7 @@ fun calculateLevel(totalXP: Int): Int {
     while (xp >= xpForNextLevel) {
         xp -= xpForNextLevel
         level++
-        xpForNextLevel += 50 // Каждый уровень требует на 50 XP больше
+        xpForNextLevel += 50
     }
 
     return level
@@ -1288,7 +1344,6 @@ fun ThemeOption(
     }
 }
 
-// Вспомогательная функция для определения системной темы
 @Composable
 fun isSystemInDarkTheme(): Boolean {
     return LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES

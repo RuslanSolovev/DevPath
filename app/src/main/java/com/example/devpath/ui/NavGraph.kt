@@ -6,12 +6,17 @@ import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.devpath.data.repository.*
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.devpath.data.repository.FavoritesRepository
+import com.example.devpath.data.repository.LessonRepository
+import com.example.devpath.data.repository.PracticeRepository
+import com.example.devpath.data.repository.QuizRepository
 import com.example.devpath.ui.navigation.BottomNavigationScreen
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @Composable
 fun DevPathNavGraph() {
@@ -19,10 +24,14 @@ fun DevPathNavGraph() {
     val currentUser = Firebase.auth.currentUser
     val startDestination = if (currentUser != null) "dashboard" else "auth"
 
+    // ✅ ИСПРАВЛЯЕМ: Используем hiltViewModel() вместо viewModel()
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
+
     // Синхронизация избранного при запуске
     LaunchedEffect(currentUser) {
         if (currentUser != null) {
-            val progressRepo = ProgressRepository()
+            // ✅ ИСПОЛЬЗУЕМ УЖЕ ПОЛУЧЕННЫЙ РЕПОЗИТОРИЙ
             val progress = progressRepo.loadProgress(currentUser.uid)
             progress?.favoriteInterviewQuestions?.let { favoriteIds ->
                 FavoritesRepository.syncWithRemote(favoriteIds)
@@ -122,7 +131,6 @@ fun DevPathNavGraph() {
             )
         }
 
-        // МАРШРУТЫ ДЛЯ ТЕСТОВ
         composable(
             route = "quiz/question/{questionId}",
             arguments = listOf(navArgument("questionId") { type = NavType.StringType })
@@ -143,11 +151,14 @@ fun DevPathNavGraph() {
                 allQuestions.shuffled(Random(System.currentTimeMillis())).take(10)
             }
 
+            // ✅ ИСПРАВЛЯЕМ: Используем hiltViewModel() здесь тоже
+            val testViewModel: ProgressViewModel = hiltViewModel()
+
             GeneralTestScreenWithResultSaver(
+                viewModel = testViewModel, // <-- Передаем ViewModel как параметр
                 questions = randomQuestions,
                 currentUserId = currentUser?.uid,
                 onTestComplete = { quizResult ->
-                    // Переходим на экран результатов
                     navController.navigate("quiz/test_results/${quizResult.correctAnswers}/${quizResult.totalQuestions}") {
                         popUpTo("quiz/general_test") { inclusive = true }
                     }
@@ -175,7 +186,6 @@ fun DevPathNavGraph() {
                     }
                 },
                 onBackToMain = {
-                    // Возвращаемся на экран с вкладками
                     navController.navigate("tabs") {
                         popUpTo("quiz/test_results/{correct}/{total}") { inclusive = true }
                         launchSingleTop = true
@@ -189,18 +199,18 @@ fun DevPathNavGraph() {
 
 @Composable
 fun GeneralTestScreenWithResultSaver(
+    viewModel: ProgressViewModel, // <-- Принимаем ViewModel как параметр
     questions: List<com.example.devpath.domain.models.QuizQuestion>,
     currentUserId: String?,
     onTestComplete: (com.example.devpath.domain.models.QuizResult) -> Unit,
     onBack: () -> Unit
 ) {
-    val progressRepo = remember { ProgressRepository() }
+    val progressRepo = viewModel.progressRepository
     val coroutineScope = rememberCoroutineScope()
 
     GeneralTestScreen(
         questions = questions,
         onTestComplete = { quizResult ->
-            // Сохраняем результат теста асинхронно
             if (currentUserId != null) {
                 val testResult = com.example.devpath.domain.models.GeneralTestResult(
                     correctAnswers = quizResult.correctAnswers,
@@ -208,13 +218,10 @@ fun GeneralTestScreenWithResultSaver(
                     percentage = (quizResult.correctAnswers * 100 / quizResult.totalQuestions)
                 )
 
-                // Запускаем корутину для сохранения
                 coroutineScope.launch {
                     progressRepo.saveGeneralTestResult(currentUserId, testResult)
                 }
             }
-
-            // Передаем результат дальше
             onTestComplete(quizResult)
         },
         onBack = onBack

@@ -1,17 +1,18 @@
 package com.example.devpath.data.repository
 
 import android.content.Context
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.ui.platform.LocalContext
 import com.example.devpath.ui.theme.AppTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class ThemeRepository(context: Context) {
+@Singleton // Добавьте эту аннотацию
+class ThemeRepository @Inject constructor(
+    context: Context
+) {
     private val preferences = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
     private val _currentTheme = MutableStateFlow(loadThemeFromPreferences())
     val currentTheme: StateFlow<AppTheme> = _currentTheme.asStateFlow()

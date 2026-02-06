@@ -25,7 +25,9 @@ import com.example.devpath.data.repository.ProgressRepository
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
-
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LessonScreen(
@@ -35,7 +37,9 @@ fun LessonScreen(
     onBack: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val progressRepo = remember { ProgressRepository() }
+
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
     val currentUser = Firebase.auth.currentUser
 
     val lesson = LessonRepository.getLessonById(lessonId) ?: LessonRepository.getLessons().first()

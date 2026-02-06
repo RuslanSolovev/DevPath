@@ -31,7 +31,9 @@ import com.example.devpath.domain.models.PracticeTask
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
-
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PracticeTaskScreen(task: PracticeTask, onBack: () -> Unit) {
@@ -42,7 +44,11 @@ fun PracticeTaskScreen(task: PracticeTask, onBack: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     val currentUser = Firebase.auth.currentUser
     val coroutineScope = rememberCoroutineScope()
-    val progressRepo = remember { ProgressRepository() }
+
+
+
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
     val clipboardManager = LocalClipboardManager.current
 
     val difficultyColor = when (task.difficulty) {

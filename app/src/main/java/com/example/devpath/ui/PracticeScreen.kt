@@ -30,6 +30,9 @@ import com.example.devpath.domain.models.PracticeTask
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,7 +41,11 @@ fun PracticeScreen(
 ) {
     val tasks = PracticeRepository.getPracticeTasks()
     val currentUser = Firebase.auth.currentUser
-    val progressRepo = remember { ProgressRepository() }
+
+
+
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
 
     // Состояние для загрузки завершенных заданий
     var completedTasks by remember { mutableStateOf<Set<String>>(emptySet()) }

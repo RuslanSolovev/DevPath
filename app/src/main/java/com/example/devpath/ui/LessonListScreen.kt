@@ -29,6 +29,9 @@ import androidx.compose.animation.core.tween
 import com.example.devpath.domain.models.Lesson
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,7 +40,10 @@ fun LessonListScreen(
 ) {
     val lessons = LessonRepository.getLessons()
     val currentUser = Firebase.auth.currentUser
-    val progressRepo = remember { ProgressRepository() }
+
+
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
 
     // Состояние для загрузки завершенных уроков
     var completedLessons by remember { mutableStateOf<Set<String>>(emptySet()) }

@@ -1,8 +1,5 @@
 package com.example.devpath.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,10 +33,11 @@ import com.example.devpath.domain.models.GeneralTestResult
 import com.example.devpath.domain.models.QuizQuestion
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.random.Random
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,7 +46,11 @@ fun QuizScreen(
 ) {
     val allQuestions = QuizRepository.getQuizQuestions()
     val currentUser = Firebase.auth.currentUser
-    val progressRepo = remember { ProgressRepository() }
+
+
+
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
 
     var selectedTab by remember { mutableStateOf(QuizTab.ALL_QUESTIONS) }
 
@@ -78,24 +80,24 @@ fun QuizScreen(
         }
     }
 
-    // ✅ ДОБАВЛЕНО: LazyListState для collapsing header
+    // STATE ДЛЯ СКРОЛЛА
     val listState = rememberLazyListState()
 
-    // ✅ ДОБАВЛЕНО: Прямой расчёт высоты header
+    // ПРЯМОЙ РАСЧЁТ ВЫСОТЫ HEADER
     val headerHeight by remember(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         derivedStateOf {
             if (listState.firstVisibleItemIndex == 0) {
-                (260 - listState.firstVisibleItemScrollOffset).coerceAtLeast(0)
+                (280 - listState.firstVisibleItemScrollOffset).coerceAtLeast(0)
             } else {
                 0
             }
         }
     }
 
-    // ✅ ДОБАВЛЕНО: Альфа для плавного исчезновения
+    // ПРОСТАЯ АЛЬФА ДЛЯ ПЛАВНОГО ИСЧЕЗНОВЕНИЯ
     val alpha by remember(headerHeight) {
         derivedStateOf {
-            (headerHeight / 260f).coerceIn(0f, 1f)
+            (headerHeight / 280f).coerceIn(0f, 1f)
         }
     }
 
@@ -109,7 +111,7 @@ fun QuizScreen(
             state = listState,
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
-            // ✅ ДОБАВЛЕНО: Collapsing header
+            // COLLAPSING HEADER
             item {
                 Column {
                     // Header карточка
@@ -181,7 +183,7 @@ fun QuizScreen(
                                             )
 
                                             Text(
-                                                text = "${allQuestions.size} вопросов",
+                                                text = "${allQuestions.size} вопросов для проверки знаний",
                                                 style = MaterialTheme.typography.bodyMedium.copy(
                                                     fontSize = if (headerHeight > 130) 14.sp else 13.sp
                                                 ),
@@ -232,7 +234,7 @@ fun QuizScreen(
                                                             fontSize = 16.sp
                                                         )
                                                         Text(
-                                                            text = "Всего",
+                                                            text = "Вопросов",
                                                             style = MaterialTheme.typography.labelSmall,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                             fontSize = 11.sp
@@ -316,7 +318,6 @@ fun QuizScreen(
                                     modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab.ordinal]),
                                     height = 3.dp,
                                     color = MaterialTheme.colorScheme.primary
-
                                 )
                             }
                         ) {
@@ -351,7 +352,7 @@ fun QuizScreen(
                 }
             }
 
-            // ✅ ОБНОВЛЕНО: Контент без Scaffold
+            // КОНТЕНТ ВКЛАДОК
             when (selectedTab) {
                 QuizTab.ALL_QUESTIONS -> {
                     items(allQuestions, key = { it.id }) { question ->
@@ -504,11 +505,12 @@ private fun GeneralTestSectionContent(
     bestResult: GeneralTestResult?,
     onHistoryItemClick: (GeneralTestResult) -> Unit
 ) {
+    // ✅ ЗАМЕНИЛИ LazyColumn на Column
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // Баннер начала теста
+        // Карточка баннера
         GeneralTestBanner(
             onStartTest = onStartTest,
             modifier = Modifier.fillMaxWidth()
@@ -522,7 +524,7 @@ private fun GeneralTestSectionContent(
                 CircularProgressIndicator()
             }
         } else {
-            // Лучший результат
+            // Карточка лучшего результата
             if (bestResult != null) {
                 BestResultCard(bestResult = bestResult)
             } else {
@@ -539,6 +541,8 @@ private fun GeneralTestSectionContent(
                 EmptyHistoryCard()
             }
         }
+
+        Spacer(modifier = Modifier.height(80.dp))
     }
 }
 
@@ -549,7 +553,8 @@ private fun GeneralTestBanner(
 ) {
     Card(
         modifier = modifier
-            .height(180.dp)
+            .fillMaxWidth()
+            .height(200.dp)
             .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
@@ -575,11 +580,11 @@ private fun GeneralTestBanner(
                     .fillMaxSize()
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(64.dp)
+                        .size(70.dp)
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
@@ -595,30 +600,62 @@ private fun GeneralTestBanner(
                         Icons.Rounded.AutoAwesome,
                         contentDescription = "Тест",
                         tint = Color.White,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(36.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Общий тест знаний по Kotlin",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        fontSize = 22.sp
+                    )
 
-                Text(
-                    "Общий тест знаний",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
-                )
+                    Text(
+                        "10 случайных вопросов из разных тем\n" +
+                                "Проверьте свои знания за 10 минут!\n" +
+                                "Результаты сохраняются в истории",
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            lineHeight = 22.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    "10 случайных вопросов\nПроверьте свои знания!",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 20.sp
-                )
+                // Кнопка-подсказка
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.PlayArrow,
+                            contentDescription = "Начать",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            "Начать тест • 10 минут",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
         }
     }
@@ -633,69 +670,116 @@ private fun BestResultCard(bestResult: GeneralTestResult) {
         else -> Color(0xFFEF4444) // Нужно подучить - красный
     }
 
+    val ratingText = when {
+        percentage >= 90 -> "Отлично!"
+        percentage >= 80 -> "Очень хорошо"
+        percentage >= 70 -> "Хорошо"
+        percentage >= 60 -> "Удовлетворительно"
+        else -> "Нужно подучить"
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(color.copy(alpha = 0.1f)),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Icon(
-                    Icons.Rounded.EmojiEvents,
-                    contentDescription = "Лучший результат",
-                    tint = color,
-                    modifier = Modifier.size(24.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(color.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.EmojiEvents,
+                        contentDescription = "Лучший результат",
+                        tint = color,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        "🏆 Ваш лучший результат",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Text(
+                        "Вы ответили правильно на ${bestResult.correctAnswers} из ${bestResult.totalQuestions} вопросов",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    "Лучший результат",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Text(
-                    "${bestResult.correctAnswers}/${bestResult.totalQuestions} правильных ответов",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Box(
+            // Прогресс бар
+            LinearProgressIndicator(
+                progress = { percentage / 100f },
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(color.copy(alpha = 0.1f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(6.dp)),
+                color = color,
+                trackColor = color.copy(alpha = 0.1f)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    "${percentage}%",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = color
-                )
+                Column {
+                    Text(
+                        ratingText,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = color
+                    )
+
+                    Text(
+                        "Последняя попытка: ${formatDate(bestResult.timestamp)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(color.copy(alpha = 0.1f))
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        "${percentage}%",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = color
+                    )
+                }
             }
         }
     }
@@ -716,22 +800,39 @@ private fun TestHistorySection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                "Последние попытки",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column {
+                Text(
+                    "📊 История попыток",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
 
-            Text(
-                "${history.size} попыток",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                Text(
+                    "Ваши последние тестирования",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    "${history.size} попыток",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Отображаем последние 10 попыток
         history.take(10).forEachIndexed { index, result ->
@@ -759,54 +860,75 @@ private fun TestHistoryItem(
     }
 
     val dateFormatter = remember {
-        SimpleDateFormat("dd.MM HH:mm", Locale.getDefault())
+        SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
     }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(16.dp),
+            .height(90.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         onClick = onClick
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Номер попытки
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(color.copy(alpha = 0.1f)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     index.toString(),
-                    style = MaterialTheme.typography.labelMedium.copy(
+                    style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold
                     ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = color
                 )
             }
 
             Column(
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    "${result.correctAnswers} из ${result.totalQuestions} правильных",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Medium
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Попытка #$index",
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(color.copy(alpha = 0.1f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            "${result.correctAnswers}/${result.totalQuestions}",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = color
+                        )
+                    }
+                }
 
                 Text(
                     dateFormatter.format(Date(result.timestamp)),
@@ -818,13 +940,13 @@ private fun TestHistoryItem(
             // Процент
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(color.copy(alpha = 0.1f))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
                 Text(
                     "${percentage}%",
-                    style = MaterialTheme.typography.labelMedium.copy(
+                    style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Bold
                     ),
                     color = color
@@ -839,8 +961,9 @@ private fun EmptyResultsCard() {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(20.dp),
+            .padding(horizontal = 16.dp)
+            .height(160.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
@@ -848,32 +971,46 @@ private fun EmptyResultsCard() {
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp),
+                .fillMaxSize()
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Icon(
-                Icons.Rounded.EmojiEvents,
-                contentDescription = "Нет результатов",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(48.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.EmojiEvents,
+                    contentDescription = "Нет результатов",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
 
-            Text(
-                "Пройдите тест первым!",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Пройдите тест первым!",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
 
-            Text(
-                "Здесь появится ваш лучший результат",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    "Здесь появится ваш лучший результат после прохождения общего теста",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
@@ -883,8 +1020,9 @@ private fun EmptyHistoryCard() {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(20.dp),
+            .padding(horizontal = 16.dp)
+            .height(160.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
@@ -892,32 +1030,46 @@ private fun EmptyHistoryCard() {
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp),
+                .fillMaxSize()
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Icon(
-                Icons.Rounded.History,
-                contentDescription = "Нет истории",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(48.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.History,
+                    contentDescription = "Нет истории",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
 
-            Text(
-                "История тестов пуста",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "История тестов пуста",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
 
-            Text(
-                "Пройдите общий тест,\nчтобы увидеть свою историю",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    "Пройдите общий тест по Kotlin,\nчтобы увидеть свою историю попыток",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
@@ -942,4 +1094,9 @@ fun getTopicName(topic: String): String {
         "type_checking" -> "Проверка типов"
         else -> topic
     }
+}
+
+private fun formatDate(timestamp: Long): String {
+    val dateFormatter = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+    return dateFormatter.format(Date(timestamp))
 }

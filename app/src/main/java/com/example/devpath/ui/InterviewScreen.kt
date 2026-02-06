@@ -40,6 +40,9 @@ import com.example.devpath.domain.models.InterviewQuestion
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,7 +77,11 @@ fun InterviewQuestionDetailScreen(
 
     val currentUser = Firebase.auth.currentUser
     val coroutineScope = rememberCoroutineScope()
-    val progressRepo = remember { ProgressRepository() }
+
+
+// Внутри @Composable функции:
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
 
     InterviewQuestionScreen(
         question = question,
@@ -108,7 +115,9 @@ fun InterviewQuestionListScreen(navController: NavHostController) {
     }
     val currentUser = Firebase.auth.currentUser
     val coroutineScope = rememberCoroutineScope()
-    val progressRepo = remember { ProgressRepository() }
+
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
 
     var selectedTab by remember { mutableStateOf(InterviewTab.ALL) }
     val questionsToShow = remember(selectedTab) {
