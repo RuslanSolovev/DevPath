@@ -837,6 +837,485 @@ object InterviewRepository {
                 """.trimIndent(),
                 category = "android",
                 difficulty = "advanced"
+            ),
+            // === Новые вопросы (31–50) ===
+
+            InterviewQuestion(
+                id = "iq31",
+                question = "Что такое Jetpack Compose и чем он отличается от XML-разметки?",
+                answer = """
+                    **Jetpack Compose** — это современный декларативный фреймворк для создания UI в Android.
+                    
+                    Отличия от XML:
+                    - **Декларативный подход**: описываем, *каким должен быть* UI, а не как его строить
+                    - **Код вместо XML**: UI пишется на Kotlin, что упрощает логику и рефакторинг
+                    - **State-driven**: UI автоматически перерисовывается при изменении состояния
+                    - **Нет findViewById**: всё работает через функции и параметры
+                    - **Меньше boilerplate**: нет адаптеров, слушателей, связывания
+                    
+                    Пример:
+                    ```kotlin
+                    @Composable
+                    fun Greeting(name: String) {
+                        Text("Hello, (name!))
+                    }
+                    ```
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq32",
+                question = "Что такое State и MutableState в Jetpack Compose?",
+                answer = """
+                    **State** — это объект, который хранит значение и позволяет Compose отслеживать изменения.
+                    
+                    **MutableState** — изменяемая версия State, которая вызывает recomposition при изменении.
+                    
+                    Создание:
+                    ```kotlin
+                    var count by remember { mutableStateOf(0) }
+                    ```
+                    
+                    Использование:
+                    ```kotlin
+                    Button(onClick = { count++ }) {
+                        Text("Clicked $("count") times")
+                    }
+                    ```
+                    
+                    Важно: только изменения `State`/`MutableState` вызывают перерисовку UI. Обычные переменные — нет.
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq33",
+                question = "Что такое Clean Architecture и зачем она нужна?",
+                answer = """
+                    **Clean Architecture** — это подход к проектированию приложений, основанный на разделении ответственности и независимости от фреймворков.
+                    
+                    Слои (изнутри наружу):
+                    1. **Domain** — чистая бизнес-логика (use cases, entities)
+                    2. **Data** — реализация источников данных (сеть, БД)
+                    3. **Presentation** — UI и взаимодействие с пользователем (ViewModel, Compose/Activity)
+                    
+                    Преимущества:
+                    - Тестируемость (бизнес-логика не зависит от Android)
+                    - Поддерживаемость (изменения в одном слое не ломают другие)
+                    - Гибкость (можно заменить UI или источник данных без переписывания логики)
+                """.trimIndent(),
+                category = "architecture",
+                difficulty = "advanced"
+            ),
+            InterviewQuestion(
+                id = "iq34",
+                question = "Как работает механизм обработки разрешений (permissions) в Android?",
+                answer = """
+                    Начиная с Android 6.0 (API 23), разрешения запрашиваются **во время выполнения**, а не при установке.
+                    
+                    Этапы:
+                    1. Проверка: `ContextCompat.checkSelfPermission()`
+                    2. Запрос: `ActivityCompat.requestPermissions()` или `registerForActivityResult()`
+                    3. Обработка результата: `onRequestPermissionsResult()` или `ActivityResultLauncher`
+                    
+                    Пример с ActivityResult:
+                    ```kotlin
+                    val permissionLauncher = registerForActivityResult(
+                        ActivityResultContracts.RequestPermission()
+                    ) { isGranted ->
+                        if (isGranted) { /* разрешено */ }
+                    }
+                    
+                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                    ```
+                    
+                    Важно: пользователь может выбрать «Больше не спрашивать» — тогда нужно направить в настройки.
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq35",
+                question = "Что такое Unit-тесты и интеграционные тесты? В чём разница?",
+                answer = """
+                    **Unit-тесты** проверяют отдельные функции или классы в изоляции (без зависимостей).
+                    - Быстрые
+                    - Не требуют Android-окружения
+                    - Используют JUnit, MockK
+                    
+                    **Интеграционные тесты** проверяют взаимодействие нескольких компонентов.
+                    - Медленнее
+                    - Могут использовать реальные зависимости (например, Room + Repository)
+                    - Проверяют корректность работы слоёв вместе
+                    
+                    Пример:
+                    - Unit: тестируем UseCase без ViewModel и Repository
+                    - Integration: тестируем Repository с настоящей базой данных
+                """.trimIndent(),
+                category = "testing",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq36",
+                question = "Что такое Parcelable и Serializable в Android? В чём разница?",
+                answer = """
+                    Оба интерфейса используются для **сериализации объектов**, но:
+                    
+                    - **Parcelable** — специфичен для Android, быстрее, меньше аллокаций
+                      ```kotlin
+                      data class User(val name: String) : Parcelable
+                      ```
+                      Генерируется автоматически с помощью `@Parcelize` (требуется плагин)
+                    
+                    - **Serializable** — стандарт Java, медленнее, проще в использовании
+                      ```kotlin
+                      data class User(val name: String) : Serializable
+                      ```
+                    
+                    Рекомендация: используйте **Parcelable** (или `@Parcelize`) для передачи данных между компонентами.
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq37",
+                question = "Что такое Context в Android и какие его типы бывают?",
+                answer = """
+                    **Context** — это интерфейс, предоставляющий доступ к ресурсам и системным сервисам приложения.
+                    
+                    Основные типы:
+                    - **Application Context** — живёт всё время приложения, не привязан к UI
+                      ```kotlin
+                      applicationContext
+                      ```
+                    - **Activity Context** — привязан к жизненному циклу Activity, содержит тему и UI-ресурсы
+                    
+                    Когда что использовать:
+                    - Для UI, диалогов, LayoutInflater — **Activity Context**
+                    - Для долгоживущих операций (например, WorkManager) — **Application Context**
+                    
+                    ❗ Никогда не сохраняйте ссылку на Activity Context в долгоживущих объектах — будет утечка памяти!
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq38",
+                question = "Что такое inline-функции в Kotlin и зачем они нужны?",
+                answer = """
+                    **Inline-функции** — это функции, код которых вставляется («встраивается») в место вызова во время компиляции.
+                    
+                    Зачем:
+                    - Избегаем накладных расходов на создание объектов (особенно для лямбд)
+                    - Позволяют использовать `return` из внешней функции (non-local return)
+                    
+                    Пример:
+                    ```kotlin
+                    inline fun myRun(block: () -> Unit) {
+                        block()
+                    }
+                    ```
+                    
+                    ⚠️ Не злоупотребляйте: увеличивает размер байткода. Используйте для функций с лямбдами.
+                """.trimIndent(),
+                category = "kotlin",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq39",
+                question = "Что такое Koin и чем он отличается от Hilt?",
+                answer = """
+                    **Koin** и **Hilt** — это фреймворки для Dependency Injection в Android.
+                    
+                    **Koin**:
+                    - Лёгкий, написан на Kotlin
+                    - Не использует аннотации компиляции (работает в рантайме)
+                    - Простая настройка через DSL
+                    - Подходит для небольших проектов
+                    
+                    **Hilt**:
+                    - Официальный DI от Google, основан на Dagger
+                    - Использует аннотации компиляции (быстрее в рантайме)
+                    - Глубокая интеграция с Android (Activity, Fragment, ViewModel)
+                    - Лучше для крупных проектов
+                    
+                    Выбор зависит от масштаба и предпочтений команды.
+                """.trimIndent(),
+                category = "android",
+                difficulty = "advanced"
+            ),
+            InterviewQuestion(
+                id = "iq40",
+                question = "Что такое DataStore и почему он лучше SharedPreferences?",
+                answer = """
+                    **DataStore** — это современная замена SharedPreferences от Android Jetpack.
+                    
+                    Преимущества над SharedPreferences:
+                    - **Асинхронный** — не блокирует UI-поток
+                    - **Типобезопасный** — поддержка Kotlin-типов и сериализации
+                    - **Поддержка Flow** — реактивное чтение данных
+                    - **Нет метода apply()/commit()** — всё через suspend-функции или Flow
+                    - **Меньше ошибок** — нет риска ConcurrentModificationException
+                    
+                    Типы:
+                    - **Preferences DataStore** — как SharedPreferences, но лучше
+                    - **Proto DataStore** — для сложных объектов через Protocol Buffers
+                    
+                    Рекомендуется использовать DataStore вместо SharedPreferences в новых проектах.
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq41",
+                question = "Что такое sealed interface в Kotlin?",
+                answer = """
+                    **Sealed interface** — это расширение sealed class, появившееся в Kotlin 1.5.
+                    
+                    Позволяет определять ограниченную иерархию реализаций, где все реализации известны компилятору.
+                    
+                    Пример:
+                    ```kotlin
+                    sealed interface Result
+                    data class Success(val data: String) : Result
+                    data class Error(val msg: String) : Result
+                    object Loading : Result
+                    ```
+                    
+                    Преимущества:
+                    - Можно использовать в `when` без `else` (exhaustive)
+                    - Реализации могут быть классами, объектами, даже другими sealed-типами
+                    - Гибче, чем sealed class (поддерживает множественное наследование)
+                """.trimIndent(),
+                category = "kotlin",
+                difficulty = "advanced"
+            ),
+            InterviewQuestion(
+                id = "iq42",
+                question = "Как работает система сборки Gradle в Android?",
+                answer = """
+                    **Gradle** использует **плагины** и **задачи (tasks)** для сборки проекта.
+                    
+                    Этапы сборки:
+                    1. **Configuration phase** — читаются build.gradle файлы
+                    2. **Execution phase** — выполняются выбранные задачи (например, `assembleDebug`)
+                    
+                    Ключевые задачи:
+                    - `assemble` — собирает APK/AAB
+                    - `check` — запускает тесты и линтеры
+                    - `build` — объединяет assemble + check
+                    
+                    Конфигурация:
+                    - **Flavors** — разные версии приложения (free/paid)
+                    - **Build types** — debug/release с разными настройками
+                    - **Dependencies** — управление библиотеками
+                    
+                    Процесс полностью настраивается через Kotlin/Groovy DSL.
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq43",
+                question = "Что такое деструктуризация в Kotlin?",
+                answer = """
+                    **Деструктуризация** — это возможность извлекать значения из объектов в отдельные переменные.
+                    
+                    Работает с:
+                    - **data class**
+                    - **List, Pair, Triple**
+                    - Любыми классами с `componentN()` функциями
+                    
+                    Пример:
+                    ```kotlin
+                    data class Person(val name: String, val age: Int)
+                    val person = Person("Alice", 30)
+                    val (name, age) = person
+                    println(name) // Alice
+                    ```
+                    
+                    Для списков:
+                    ```kotlin
+                    val list = listOf("a", "b", "c")
+                    val (first, second) = list
+                    ```
+                    
+                    Удобно для упрощения кода и повышения читаемости.
+                """.trimIndent(),
+                category = "kotlin",
+                difficulty = "beginner"
+            ),
+            InterviewQuestion(
+                id = "iq44",
+                question = "Что такое Navigation Component в Android?",
+                answer = """
+                    **Navigation Component** — часть Jetpack для управления навигацией между экранами.
+                    
+                    Компоненты:
+                    - **NavGraph** — XML или Compose-граф маршрутов
+                    - **NavController** — управляет переходами
+                    - **NavHost** — контейнер для destinations
+                    
+                    Преимущества:
+                    - Автоматическая обработка кнопки «Назад»
+                    - Безопасная передача аргументов (с типами)
+                    - Deep links поддержка
+                    - Интеграция с меню и BottomNavigationView
+                    
+                    В Compose:
+                    ```kotlin
+                    NavHost(navController, startDestination = "home") {
+                        composable("home") { HomeScreen() }
+                        composable("detail/{id}") { DetailScreen(it.arguments?.getString("id")) }
+                    }
+                    ```
+                """.trimIndent(),
+                category = "android",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq45",
+                question = "Что такое ViewBinding и чем он отличается от findViewById?",
+                answer = """
+                    **ViewBinding** — это функция, генерирующая класс для каждого layout-файла, позволяя безопасно обращаться к View.
+                    
+                    Преимущества над findViewById:
+                    - **Типобезопасность** — ошибка на этапе компиляции, а не рантайма
+                    - **Null safety** — не нужно проверять null для View в Activity/Fragment
+                    - **Нет магических ID** — доступ через свойства
+                    
+                    Пример:
+                    ```kotlin
+                    class MainActivity : AppCompatActivity() {
+                        private lateinit var binding: ActivityMainBinding
+                        
+                        override fun onCreate(savedInstanceState: Bundle?) {
+                            super.onCreate(savedInstanceState)
+                            binding = ActivityMainBinding.inflate(layoutInflater)
+                            setContentView(binding.root)
+                            binding.button.text = "Click me"
+                        }
+                    }
+                    ```
+                    
+                    ViewBinding заменил ButterKnife и упростил работу с UI.
+                """.trimIndent(),
+                category = "android",
+                difficulty = "beginner"
+            ),
+            InterviewQuestion(
+                id = "iq46",
+                question = "Что такое typealias в Kotlin?",
+                answer = """
+                    **typealias** — это псевдоним для существующего типа, улучшающий читаемость кода.
+                    
+                    Пример:
+                    ```kotlin
+                    typealias JSON = Map<String, Any?>
+                    typealias UserId = String
+                    typealias CompletionHandler = (Result<String>) -> Unit
+                    ```
+                    
+                    Использование:
+                    ```kotlin
+                    fun fetchUser(id: UserId, handler: CompletionHandler) {
+                        // ...
+                    }
+                    ```
+                    
+                    Не создаёт новый тип — это просто алиас. Полезен для документирования и упрощения сложных сигнатур.
+                """.trimIndent(),
+                category = "kotlin",
+                difficulty = "intermediate"
+            ),
+            InterviewQuestion(
+                id = "iq47",
+                question = "Что такое Memory Leak в Android и как его избежать?",
+                answer = """
+                    **Memory Leak** — это ситуация, когда объект остаётся в памяти, хотя больше не нужен.
+                    
+                    Распространённые причины:
+                    - Хранение ссылки на Activity/Context в статическом поле
+                    - Анонимные классы (например, Runnable), захватывающие Activity
+                    - Незакрытые слушатели или подписки (например, в LiveData без LifecycleOwner)
+                    
+                    Как избежать:
+                    - Использовать **Application Context** вместо Activity Context, где возможно
+                    - Отписываться от наблюдателей в `onDestroy()` или через `Lifecycle`
+                    - Использовать **WeakReference** для коллбэков
+                    - Проверять утечки с помощью **Android Studio Profiler** или **LeakCanary**
+                """.trimIndent(),
+                category = "android",
+                difficulty = "advanced"
+            ),
+            InterviewQuestion(
+                id = "iq48",
+                question = "Что такое CoroutineScope и какие виды Scope бывают?",
+                answer = """
+                    **CoroutineScope** — это контекст, в котором запускаются корутины. Он управляет их жизненным циклом.
+                    
+                    Встроенные Scope:
+                    - **GlobalScope** — глобальный, не привязан к жизненному циклу (опасен!)
+                    - **lifecycleScope** — в Activity/Fragment, автоматически отменяется при onDestroy()
+                    - **viewModelScope** — в ViewModel, отменяется при onCleared()
+                    - **coroutineScope {}** — создаёт дочерний scope, ждёт завершения всех дочерних корутин
+                    - **supervisorScope {}** — как coroutineScope, но одна ошибка не отменяет остальные
+                    
+                    Рекомендация: никогда не используйте GlobalScope в Android. Всегда привязывайте к жизненному циклу.
+                """.trimIndent(),
+                category = "kotlin",
+                difficulty = "advanced"
+            ),
+            InterviewQuestion(
+                id = "iq49",
+                question = "Что такое Material Design и как он применяется в Android?",
+                answer = """
+                    **Material Design** — это система дизайна от Google для создания единообразных и интуитивных интерфейсов.
+                    
+                    Основные принципы:
+                    - **Глубина и тени** — карточки, возвышения
+                    - **Анимации** — плавные переходы, ripple-эффекты
+                    - **Цветовая палитра** — primary, secondary, surface цвета
+                    - **Компоненты** — Button, Card, BottomSheet, Snackbar
+                    
+                    В Android используется через:
+                    - **Material Components Library** (`com.google.android.material:material`)
+                    - **Compose Material 3** — для Jetpack Compose (`androidx.compose.material3`)
+                    
+                    Пример Compose:
+                    ```kotlin
+                    Button(onClick = {}) {
+                        Text("Submit")
+                    }
+                    ```
+                """.trimIndent(),
+                category = "android",
+                difficulty = "beginner"
+            ),
+            InterviewQuestion(
+                id = "iq50",
+                question = "Что такое CI/CD и как оно используется в Android-разработке?",
+                answer = """
+                    **CI/CD (Continuous Integration / Continuous Delivery)** — это практика автоматизации сборки, тестирования и доставки приложения.
+                    
+                    В Android CI/CD обычно включает:
+                    - **Сборку APK/AAB** на каждый коммит
+                    - **Запуск unit и интеграционных тестов**
+                    - **Проверку кода** (lint, detekt, ktlint)
+                    - **Публикацию в Firebase App Distribution или Google Play**
+                    
+                    Популярные инструменты:
+                    - GitHub Actions
+                    - GitLab CI
+                    - Bitrise
+                    - CircleCI
+                    - Firebase Test Lab (для тестов на реальных устройствах)
+                    
+                    Преимущества: быстрая обратная связь, меньше багов в продакшене, автоматизация рутины.
+                """.trimIndent(),
+                category = "general",
+                difficulty = "intermediate"
             )
         )
     }
