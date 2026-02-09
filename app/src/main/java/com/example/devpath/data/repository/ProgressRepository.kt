@@ -3,12 +3,11 @@ package com.example.devpath.data.repository
 import com.example.devpath.data.local.AppDatabase
 import com.example.devpath.data.local.entity.toDomain
 import com.example.devpath.data.local.entity.toEntity
-import com.example.devpath.domain.models.GeneralTestResult
+import com.example.devpath.domain.models.GeneralTestResult // ← ДОБАВЛЕН ИМПОРТ
 import com.example.devpath.domain.models.UserProgress
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -105,7 +104,7 @@ class ProgressRepository @Inject constructor(
             println("DEBUG: Ошибка загрузки прогресса: ${e.message}")
             // В случае ошибки возвращаем локальные данные
             val localProgress = localDb.userProgressDao().getProgress(userId)
-            localProgress?.toDomain()
+            return@withContext localProgress?.toDomain()
         }
     }
 
@@ -234,5 +233,109 @@ class ProgressRepository @Inject constructor(
             favoriteInterviewQuestions = currentFavorites
         )
         saveProgress(updatedProgress)
+    }
+
+    // Трекинг ежедневной активности (полностью офлайн)
+    suspend fun trackDailyActivity(userId: String) {
+        val progress = loadLocalProgress(userId) ?: UserProgress.createEmpty(userId)
+        val today = getTodayDateString()
+
+        // Проверяем стрик
+        val newStreak = if (progress.lastActivityDate == today) {
+            progress.dailyStreak // Сегодня уже был активен
+        } else if (progress.lastActivityDate == getYesterdayDateString()) {
+            progress.dailyStreak + 1 // Продолжаем стрик
+        } else {
+            1 // Новый стрик
+        }
+
+        // Обновляем прогресс
+        val updatedProgress = progress.copy(
+            dailyStreak = newStreak,
+            lastActivityDate = today
+        )
+
+        // Сохраняем мгновенно локально
+        localDb.userProgressDao().insertProgress(updatedProgress.toEntity())
+
+        // В фоне синхронизируем с Firebase
+        if (useFirebase) {
+            syncScope.launch {
+                db.collection("users").document(userId).set(updatedProgress).await()
+            }
+        }
+    }
+
+    // Проверка и разблокировка достижений (офлайн)
+    suspend fun checkAndUnlockAchievements(userId: String): Set<String> {
+        val progress = loadLocalProgress(userId) ?: return emptySet()
+        val unlocked = progress.achievementsUnlocked.toMutableSet()
+
+        // Достижение "Первый шаг" — завершил первый урок
+        if (progress.completedLessons.isNotEmpty() && !unlocked.contains("first_step")) {
+            unlocked.add("first_step")
+            awardXP(userId, 50)
+        }
+
+        // Достижение "Стрик 3 дня" — 3 дня подряд
+        if (progress.dailyStreak >= 3 && !unlocked.contains("streak_3")) {
+            unlocked.add("streak_3")
+            awardXP(userId, 100)
+        }
+
+        // Достижение "Практик" — 5 решённых задач
+        if (progress.completedPracticeTasks.size >= 5 && !unlocked.contains("practicer")) {
+            unlocked.add("practicer")
+            awardXP(userId, 150)
+        }
+
+        // Сохраняем обновлённые достижения
+        if (unlocked.size > progress.achievementsUnlocked.size) {
+            val updatedProgress = progress.copy(achievementsUnlocked = unlocked)
+            saveProgress(updatedProgress)
+        }
+
+        return unlocked
+    }
+
+    // Награда за достижение (офлайн)
+    private suspend fun awardXP(userId: String, amount: Int) {
+        val progress = loadLocalProgress(userId) ?: return
+        val updatedProgress = progress.copy(
+            totalXP = progress.totalXP + amount,
+            level = calculateLevel(progress.totalXP + amount)
+        )
+        saveProgress(updatedProgress)
+    }
+
+    // Вспомогательные функции дат
+    private fun getTodayDateString(): String {
+        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date())
+    }
+
+    private fun getYesterdayDateString(): String {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(calendar.time)
+    }
+
+    // Функция расчёта уровня по XP
+    private fun calculateLevel(totalXP: Int): Int {
+        if (totalXP < 100) return 1
+        if (totalXP < 250) return 2
+        if (totalXP < 450) return 3
+        if (totalXP < 700) return 4
+        if (totalXP < 1000) return 5
+        var xp = totalXP
+        var level = 1
+        var xpForNextLevel = 100
+        while (xp >= xpForNextLevel) {
+            xp -= xpForNextLevel
+            level++
+            xpForNextLevel += 50
+        }
+        return level
     }
 }

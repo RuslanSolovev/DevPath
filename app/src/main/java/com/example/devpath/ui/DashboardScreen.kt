@@ -35,11 +35,173 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.example.devpath.data.repository.LocalThemeRepository
+import com.example.devpath.domain.models.UserProgress
 import com.example.devpath.ui.theme.AppTheme
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
+
+// Функция расчета уровня из XP
+private fun calculateLevelFromXP(totalXP: Int): Int {
+    if (totalXP < 100) return 1
+    if (totalXP < 250) return 2
+    if (totalXP < 450) return 3
+    if (totalXP < 700) return 4
+    if (totalXP < 1000) return 5
+    var xp = totalXP
+    var level = 1
+    var xpForNextLevel = 100
+    while (xp >= xpForNextLevel) {
+        xp -= xpForNextLevel
+        level++
+        xpForNextLevel += 50
+    }
+    return level
+}
+
+// Исправленная система достижений (15 достижений без XP)
+private val achievementsList = listOf(
+    Achievement(
+        id = "first_lesson",
+        title = "Первый шаг",
+        description = "Пройдите первый урок",
+        icon = Icons.Rounded.Assignment,
+        achieved = false
+    ),
+    Achievement(
+        id = "first_test",
+        title = "Эрудит",
+        description = "Пройдите первый тест",
+        icon = Icons.Rounded.Quiz,
+        achieved = false
+    ),
+    Achievement(
+        id = "first_practice",
+        title = "Практик",
+        description = "Выполните первое задание",
+        icon = Icons.Rounded.Code,
+        achieved = false
+    ),
+    Achievement(
+        id = "lesson_3",
+        title = "Любознательный",
+        description = "Пройдите 3 урока",
+        icon = Icons.Rounded.MenuBook,
+        achieved = false
+    ),
+    Achievement(
+        id = "test_3",
+        title = "Знаток",
+        description = "Пройдите 3 теста",
+        icon = Icons.Rounded.Assessment,
+        achieved = false
+    ),
+    Achievement(
+        id = "practice_3",
+        title = "Трудолюбивый",
+        description = "Выполните 3 задания",
+        icon = Icons.Rounded.Build,
+        achieved = false
+    ),
+    Achievement(
+        id = "lesson_5",
+        title = "Усердный ученик",
+        description = "Пройдите 5 уроков",
+        icon = Icons.Rounded.School,
+        achieved = false
+    ),
+    Achievement(
+        id = "test_5",
+        title = "Тестировщик",
+        description = "Пройдите 5 тестов",
+        icon = Icons.Rounded.CheckCircle,
+        achieved = false
+    ),
+    Achievement(
+        id = "practice_5",
+        title = "Мастер практики",
+        description = "Выполните 5 заданий",
+        icon = Icons.Rounded.Handyman,
+        achieved = false
+    ),
+    Achievement(
+        id = "lesson_10",
+        title = "Продвинутый",
+        description = "Пройдите 10 уроков",
+        icon = Icons.Rounded.AutoAwesome,
+        achieved = false
+    ),
+    Achievement(
+        id = "test_10",
+        title = "Профессионал",
+        description = "Пройдите 10 тестов",
+        icon = Icons.Rounded.Verified,
+        achieved = false
+    ),
+    Achievement(
+        id = "practice_10",
+        title = "Виртуоз кода",
+        description = "Выполните 10 заданий",
+        icon = Icons.Rounded.Computer,
+        achieved = false
+    ),
+    Achievement(
+        id = "all_lessons",
+        title = "Всезнайка",
+        description = "Пройдите все уроки курса",
+        icon = Icons.Rounded.EmojiEvents,
+        achieved = false
+    ),
+    Achievement(
+        id = "streak_3",
+        title = "Последовательный",
+        description = "Занимайтесь 3 дня подряд",
+        icon = Icons.Rounded.TrendingUp,
+        achieved = false
+    ),
+    Achievement(
+        id = "complete_all",
+        title = "Абсолютный чемпион",
+        description = "Пройдите все уроки, тесты и задания",
+        icon = Icons.Rounded.WorkspacePremium,
+        achieved = false
+    )
+)
+
+// Список рекомендуемых модулей
+private val recommendedModules = listOf(
+    RecommendedModule(
+        id = "practice",
+        title = "Практика",
+        description = "Решайте задачи",
+        icon = Icons.Rounded.Code,
+        color = Color(0xFF6366F1)
+    ),
+    RecommendedModule(
+        id = "quiz",
+        title = "Тесты",
+        description = "Проверьте знания",
+        icon = Icons.Rounded.Quiz,
+        color = Color(0xFF10B981)
+    ),
+    RecommendedModule(
+        id = "interview",
+        title = "Собеседование",
+        description = "Подготовка к собесу",
+        icon = Icons.Rounded.WorkspacePremium,
+        color = Color(0xFFF59E0B)
+    ),
+    RecommendedModule(
+        id = "full_course",
+        title = "Полный курс",
+        description = "Все уроки",
+        icon = Icons.Rounded.School,
+        color = Color(0xFF8B5CF6)
+    )
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -52,17 +214,20 @@ fun DashboardScreen(
     onNavigateToInterview: () -> Unit = {}
 ) {
     val currentUser = Firebase.auth.currentUser
-
-    // ✅ ИСПРАВЛЯЕМ: Используем hiltViewModel()
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
-
     var displayName by remember { mutableStateOf("") }
     var totalXP by remember { mutableStateOf(0) }
     var level by remember { mutableStateOf(1) }
     var shouldShowProfile by remember { mutableStateOf(false) }
     var userPhotoUrl by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+
+    // Добавляем состояние для хранения полного прогресса
+    var userProgress by remember { mutableStateOf<UserProgress?>(null) }
+
+    // Состояние для общего количества уроков
+    var totalLessonsCount by remember { mutableStateOf(12) } // Начальное значение
 
     // Анимация прогресса
     val progressAnimation = remember { Animatable(0f) }
@@ -77,7 +242,6 @@ fun DashboardScreen(
 
     // Состояние меню
     var showSettingsMenu by remember { mutableStateOf(false) }
-
     val coroutineScope = rememberCoroutineScope()
 
     // Мотивационные фразы
@@ -100,78 +264,186 @@ fun DashboardScreen(
             "Код пишется не пальцами, а головой! 🤔"
         )
     }
-
     var currentMotivationalPhrase by remember { mutableStateOf(motivationalPhrases.random()) }
     var showMotivationalToast by remember { mutableStateOf(false) }
 
-    // ✅ ОПТИМИЗИРОВАННАЯ ЗАГРУЗКА: Загружаем только один раз при первом запуске
+    // Функция для расчета XP для уровня
+    fun calculateXPForLevel(level: Int): Int {
+        return when (level) {
+            1 -> 0
+            2 -> 100
+            3 -> 250
+            4 -> 450
+            5 -> 700
+            6 -> 1000
+            else -> {
+                var xp = 1000
+                var currentLevel = 6
+                var xpForNextLevel = 150
+                while (currentLevel < level) {
+                    xp += xpForNextLevel
+                    xpForNextLevel += 50
+                    currentLevel++
+                }
+                xp
+            }
+        }
+    }
+
+    // Функция для расчета прогресса до следующего уровня
+    fun calculateProgressToNextLevel(totalXP: Int): Float {
+        val currentLevel = calculateLevelFromXP(totalXP)
+        val xpForCurrentLevel = calculateXPForLevel(currentLevel)
+        val xpForNextLevel = calculateXPForLevel(currentLevel + 1)
+        val xpInCurrentLevel = totalXP - xpForCurrentLevel
+        val xpNeededForNextLevel = xpForNextLevel - xpForCurrentLevel
+
+        return if (xpNeededForNextLevel > 0) {
+            (xpInCurrentLevel.toFloat() / xpNeededForNextLevel).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+    }
+
+    // Функции для получения реальных данных
+    fun getCompletedLessonsCount(): Int {
+        return userProgress?.completedLessons?.size ?: 0
+    }
+
+    fun getCompletedTestsCount(): Int {
+        return userProgress?.quizResults?.size ?: 0
+    }
+
+    fun getCompletedPracticeCount(): Int {
+        return userProgress?.completedPracticeTasks?.size ?: 0
+    }
+
+    fun calculateLearningProgress(): Float {
+        val completed = getCompletedLessonsCount()
+        return if (totalLessonsCount > 0) completed.toFloat() / totalLessonsCount else 0f
+    }
+
+    fun getWeeklyLessons(): Int {
+        return userProgress?.completedLessons?.size ?: 0
+    }
+
+    fun getWeeklyCorrectAnswers(): Int {
+        return userProgress?.quizResults?.values?.count { it } ?: 0
+    }
+
+    fun getWeeklyPracticeTasks(): Int {
+        return userProgress?.completedPracticeTasks?.size ?: 0
+    }
+
+    fun getUserAchievements(): List<Achievement> {
+        val progress = userProgress ?: return achievementsList
+
+        val completedLessons = getCompletedLessonsCount()
+        val completedTests = getCompletedTestsCount()
+        val completedPractice = getCompletedPracticeCount()
+        val dailyStreak = progress.dailyStreak
+
+        return achievementsList.map { achievement ->
+            val achieved = when (achievement.id) {
+                // Уроки
+                "first_lesson" -> completedLessons >= 1
+                "lesson_3" -> completedLessons >= 3
+                "lesson_5" -> completedLessons >= 5
+                "lesson_10" -> completedLessons >= 10
+                "all_lessons" -> completedLessons >= totalLessonsCount
+
+                // Тесты
+                "first_test" -> completedTests >= 1
+                "test_3" -> completedTests >= 3
+                "test_5" -> completedTests >= 5
+                "test_10" -> completedTests >= 10
+
+                // Практика
+                "first_practice" -> completedPractice >= 1
+                "practice_3" -> completedPractice >= 3
+                "practice_5" -> completedPractice >= 5
+                "practice_10" -> completedPractice >= 10
+
+                // Специальные
+                "streak_3" -> dailyStreak >= 3
+                "complete_all" -> completedLessons >= totalLessonsCount &&
+                        completedTests >= 10 &&
+                        completedPractice >= 10
+
+                else -> false
+            }
+
+            achievement.copy(achieved = achieved)
+        }
+    }
+
+    // Загрузка прогресса
     LaunchedEffect(Unit) {
         if (currentUser != null) {
             isLoading = true
             try {
-                // 1. Сначала быстрая загрузка локальных данных
+                // Загружаем локальные данные
                 val localProgress = progressRepo.loadLocalProgress(currentUser.uid)
-
                 if (localProgress != null) {
-                    // Мгновенно обновляем UI с локальными данными
-                    displayName = localProgress.displayName ?: currentUser.displayName ?: "Гость"
+                    userProgress = localProgress
+                    displayName = localProgress.displayName.ifEmpty {
+                        currentUser.displayName ?: "Гость"
+                    }
                     totalXP = localProgress.totalXP
-                    level = calculateLevel(localProgress.totalXP)
+                    // Рассчитываем уровень из XP
+                    level = calculateLevelFromXP(totalXP)
                     userPhotoUrl = currentUser.photoUrl?.toString()
 
                     // Анимация прогресса
-                    val progressPercent = (localProgress.totalXP % 100) / 100f
+                    val progressPercent = calculateProgressToNextLevel(localProgress.totalXP)
                     progressAnimation.animateTo(
                         targetValue = progressPercent,
                         animationSpec = tween(800, easing = LinearEasing)
                     )
 
-                    if (localProgress.displayName.isNullOrBlank()) {
+                    if (localProgress.displayName.isBlank()) {
                         shouldShowProfile = true
                     }
                 } else {
-                    // Если локальных данных нет, показываем пустые значения
                     displayName = currentUser.displayName ?: "Гость"
                     shouldShowProfile = true
                 }
 
-                // 2. В фоне загружаем полные данные (с синхронизацией Firebase)
+                // Фоновая загрузка полных данных
                 coroutineScope.launch {
                     val fullProgress = progressRepo.loadProgress(currentUser.uid)
                     fullProgress?.let { progress ->
-                        displayName = progress.displayName ?: currentUser.displayName ?: "Гость"
-                        totalXP = progress.totalXP
-
-                        val calculatedLevel = calculateLevel(progress.totalXP)
-                        level = calculatedLevel
-
-                        // Если уровень изменился, сохраняем
-                        if (calculatedLevel != progress.level) {
-                            progressRepo.saveProgress(progress.copy(level = calculatedLevel))
+                        userProgress = progress
+                        displayName = progress.displayName.ifEmpty {
+                            currentUser.displayName ?: "Гость"
                         }
+                        totalXP = progress.totalXP
+                        level = calculateLevelFromXP(progress.totalXP)
 
-                        // Обновляем анимацию
-                        val progressPercent = (progress.totalXP % 100) / 100f
+                        val progressPercent = calculateProgressToNextLevel(progress.totalXP)
                         progressAnimation.animateTo(
                             targetValue = progressPercent,
                             animationSpec = tween(800, easing = LinearEasing)
                         )
 
-                        if (progress.displayName.isNullOrBlank()) {
+                        if (progress.displayName.isBlank()) {
                             shouldShowProfile = true
                         }
                     }
                 }
+
+                // TODO: Загрузить реальное количество уроков из базы данных
+                // totalLessonsCount = lessonRepository.getTotalLessonsCount()
+                // Пока оставляем 12
+
             } catch (e: Exception) {
                 println("DEBUG: Ошибка в Dashboard: ${e.message}")
-                // В случае ошибки используем минимальные данные
                 displayName = currentUser.displayName ?: "Гость"
             } finally {
                 isLoading = false
             }
         } else {
             isLoading = false
-            // Если пользователь не авторизован, показываем гостевой режим
             displayName = "Гость"
         }
     }
@@ -191,13 +463,23 @@ fun DashboardScreen(
             MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
         )
     )
-
     val secondaryGradient = Brush.linearGradient(
         colors = listOf(
             MaterialTheme.colorScheme.secondary,
             MaterialTheme.colorScheme.secondary.copy(alpha = 0.8f)
         )
     )
+
+    // Расчет XP для отображения
+    val xpForCurrentLevel = calculateXPForLevel(level)
+    val xpForNextLevel = calculateXPForLevel(level + 1)
+    val xpInCurrentLevel = (totalXP - xpForCurrentLevel).coerceAtLeast(0)
+    val xpNeededForNextLevel = (xpForNextLevel - xpForCurrentLevel).coerceAtLeast(1)
+
+    // Рассчитываем прогресс достижений
+    val userAchievements = getUserAchievements()
+    val unlockedAchievementsCount = userAchievements.count { it.achieved }
+    val totalAchievementsCount = userAchievements.size
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -226,7 +508,6 @@ fun DashboardScreen(
                     }
                 },
                 navigationIcon = {
-                    // Аватар пользователя
                     Box(
                         modifier = Modifier
                             .size(40.dp)
@@ -260,7 +541,6 @@ fun DashboardScreen(
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
                         } else {
-                            // Индикатор загрузки
                             CircularProgressIndicator(
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(24.dp),
@@ -270,7 +550,6 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
-                    // Кнопка мотивации с колокольчиком
                     IconButton(
                         onClick = {
                             currentMotivationalPhrase = motivationalPhrases.random()
@@ -306,7 +585,6 @@ fun DashboardScreen(
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
             if (isLoading) {
-                // Индикатор загрузки
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -332,11 +610,9 @@ fun DashboardScreen(
                         .padding(paddingValues),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
-                    item {
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
 
-                    // Мотивационная фраза (появляется после нажатия на колокольчик)
+                    // Мотивационная фраза
                     if (showMotivationalToast) {
                         item {
                             Surface(
@@ -402,20 +678,16 @@ fun DashboardScreen(
                                     .padding(24.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                // Круглый прогресс с градиентом
                                 Box(
                                     modifier = Modifier.size(160.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    // Фон круга
                                     CircularProgressIndicator(
                                         progress = 1f,
                                         modifier = Modifier.size(160.dp),
                                         strokeWidth = 12.dp,
                                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                                     )
-
-                                    // Анимированный прогресс
                                     CircularProgressIndicator(
                                         progress = progressAnimation.value,
                                         modifier = Modifier.size(160.dp),
@@ -423,8 +695,6 @@ fun DashboardScreen(
                                         color = MaterialTheme.colorScheme.primary,
                                         trackColor = Color.Transparent
                                     )
-
-                                    // Внутренний круг
                                     Box(
                                         modifier = Modifier
                                             .size(120.dp)
@@ -439,9 +709,7 @@ fun DashboardScreen(
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text(
                                                 animatedLevel.toInt().toString(),
                                                 style = MaterialTheme.typography.displayLarge.copy(
@@ -458,10 +726,7 @@ fun DashboardScreen(
                                         }
                                     }
                                 }
-
                                 Spacer(modifier = Modifier.height(24.dp))
-
-                                // XP и прогресс
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceEvenly
@@ -473,10 +738,21 @@ fun DashboardScreen(
                                         gradient = primaryGradient
                                     )
                                     StatItem(
-                                        value = "${totalXP % 100}/100",
+                                        value = "$xpInCurrentLevel/$xpNeededForNextLevel",
                                         label = "До след. уровня",
                                         icon = Icons.Filled.TrendingUp,
                                         gradient = secondaryGradient
+                                    )
+                                    StatItem(
+                                        value = "$unlockedAchievementsCount/$totalAchievementsCount",
+                                        label = "Достижения",
+                                        icon = Icons.Filled.EmojiEvents, // Используем EmojiEvents вместо Trophy
+                                        gradient = Brush.linearGradient(
+                                            colors = listOf(
+                                                Color(0xFFF59E0B),
+                                                Color(0xFFF59E0B).copy(alpha = 0.8f)
+                                            )
+                                        )
                                     )
                                 }
                             }
@@ -485,15 +761,12 @@ fun DashboardScreen(
 
                     // Рекомендуемые модули
                     item {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        ) {
+                        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                             Text(
                                 "Рекомендуемые модули",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
-
                             LazyRow(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -515,30 +788,9 @@ fun DashboardScreen(
                         }
                     }
 
-                    // Ежедневная цель
-                    item {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        ) {
-                            Text(
-                                "Ежедневная цель",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                modifier = Modifier.padding(bottom = 12.dp)
-                            )
-
-                            DailyGoalCard(
-                                completed = 0,
-                                total = 5,
-                                onComplete = { /* TODO */ }
-                            )
-                        }
-                    }
-
                     // Путь обучения
                     item {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        ) {
+                        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -552,45 +804,65 @@ fun DashboardScreen(
                                     Text("Смотреть все")
                                 }
                             }
-
                             LearningPathCard(
                                 title = "Kotlin для начинающих",
                                 description = "Основы программирования на Kotlin",
-                                progress = 0.0f,
-                                duration = "8 часов",
-                                lessonsCompleted = 0,
-                                totalLessons = 25,
+                                progress = calculateLearningProgress(),
+                                duration = "",
+                                lessonsCompleted = getCompletedLessonsCount(),
+                                totalLessons = totalLessonsCount,
                                 onClick = onNavigateToTabs
                             )
                         }
                     }
 
-                    // Достижения
+                    // Достижения с прогрессом
                     item {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        ) {
-                            Text(
-                                "Ваши достижения",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                modifier = Modifier.padding(bottom = 12.dp)
+                        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Ваши достижения",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                                Text(
+                                    "$unlockedAchievementsCount/$totalAchievementsCount",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // Прогресс-бар достижений
+                            LinearProgressIndicator(
+                                progress = if (totalAchievementsCount > 0)
+                                    unlockedAchievementsCount.toFloat() / totalAchievementsCount
+                                else 0f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = Color(0xFFF59E0B),
+                                trackColor = Color(0xFFF59E0B).copy(alpha = 0.2f)
                             )
-
+                            Spacer(modifier = Modifier.height(16.dp))
                             LazyRow(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(achievements) { achievement ->
+                                items(userAchievements) { achievement ->
                                     AchievementBadge(
                                         achievement = achievement,
-                                        onClick = { /* TODO */ }
+                                        onClick = { /* TODO: Подробности */ }
                                     )
                                 }
                             }
                         }
                     }
 
-                    // Статистика
+                    // Статистика за неделю
                     item {
                         Surface(
                             modifier = Modifier
@@ -606,31 +878,30 @@ fun DashboardScreen(
                                     .padding(20.dp)
                             ) {
                                 Text(
-                                    "Статистика за неделю",
+                                    "Ваша активность",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     modifier = Modifier.padding(bottom = 16.dp)
                                 )
-
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     StatCard(
-                                        value = "0",
+                                        value = getCompletedLessonsCount().toString(),
                                         label = "Пройдено уроков",
                                         icon = Icons.Rounded.MenuBook,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     StatCard(
-                                        value = "0",
-                                        label = "Правильных ответов",
+                                        value = getCompletedTestsCount().toString(),
+                                        label = "Пройдено тестов",
                                         icon = Icons.Rounded.CheckCircle,
                                         color = MaterialTheme.colorScheme.secondary
                                     )
                                     StatCard(
-                                        value = "0",
-                                        label = "Новых навыков",
-                                        icon = Icons.Rounded.AutoAwesome,
+                                        value = getCompletedPracticeCount().toString(),
+                                        label = "Выполнено заданий",
+                                        icon = Icons.Rounded.Code,
                                         color = MaterialTheme.colorScheme.tertiary
                                     )
                                 }
@@ -638,103 +909,112 @@ fun DashboardScreen(
                         }
                     }
 
-                    item {
-                        Spacer(modifier = Modifier.height(80.dp))
-                    }
+                    item { Spacer(modifier = Modifier.height(80.dp)) }
                 }
             }
         }
+    }
 
-        // Настройки меню
-        if (showSettingsMenu) {
-            AlertDialog(
-                onDismissRequest = { showSettingsMenu = false },
-                title = { Text("Настройки") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Профиль
-                        ListItem(
-                            headlineContent = { Text("Профиль") },
-                            leadingContent = {
-                                Icon(
-                                    Icons.Outlined.Person,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            },
-                            modifier = Modifier.clickable {
-                                showSettingsMenu = false
-                                onNavigateToProfile()
-                            }
-                        )
-
-                        Divider()
-
-                        // Тема
-                        Text(
-                            "Тема приложения",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                        )
-
-                        ThemeOption(
-                            title = "Системная",
-                            selected = currentTheme == AppTheme.SYSTEM,
-                            icon = if (isSystemInDarkTheme()) Icons.Default.DarkMode else Icons.Default.LightMode,
-                            onClick = {
-                                themeRepository.setTheme(AppTheme.SYSTEM)
-                            }
-                        )
-
-                        ThemeOption(
-                            title = "Светлая",
-                            selected = currentTheme == AppTheme.LIGHT,
-                            icon = Icons.Default.LightMode,
-                            onClick = {
-                                themeRepository.setTheme(AppTheme.LIGHT)
-                            }
-                        )
-
-                        ThemeOption(
-                            title = "Тёмная",
-                            selected = currentTheme == AppTheme.DARK,
-                            icon = Icons.Default.DarkMode,
-                            onClick = {
-                                themeRepository.setTheme(AppTheme.DARK)
-                            }
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showSettingsMenu = false
-                            onSignOut()
+    // Настройки меню
+    if (showSettingsMenu) {
+        AlertDialog(
+            onDismissRequest = { showSettingsMenu = false },
+            title = { Text("Настройки") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ListItem(
+                        headlineContent = { Text("Профиль") },
+                        leadingContent = {
+                            Icon(
+                                Icons.Outlined.Person,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Icon(Icons.Outlined.ExitToApp, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Выйти")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showSettingsMenu = false }
-                    ) {
-                        Text("Закрыть")
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(20.dp)
-            )
-        }
+                        modifier = Modifier.clickable {
+                            showSettingsMenu = false
+                            onNavigateToProfile()
+                        }
+                    )
+                    Divider()
+                    Text(
+                        "Тема приложения",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                    )
+                    ThemeOption(
+                        title = "Системная",
+                        selected = currentTheme == AppTheme.SYSTEM,
+                        icon = if (isSystemInDarkTheme()) Icons.Default.DarkMode else Icons.Default.LightMode,
+                        onClick = {
+                            themeRepository.setTheme(AppTheme.SYSTEM)
+                        }
+                    )
+                    ThemeOption(
+                        title = "Светлая",
+                        selected = currentTheme == AppTheme.LIGHT,
+                        icon = Icons.Default.LightMode,
+                        onClick = {
+                            themeRepository.setTheme(AppTheme.LIGHT)
+                        }
+                    )
+                    ThemeOption(
+                        title = "Тёмная",
+                        selected = currentTheme == AppTheme.DARK,
+                        icon = Icons.Default.DarkMode,
+                        onClick = {
+                            themeRepository.setTheme(AppTheme.DARK)
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSettingsMenu = false
+                        onSignOut()
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Outlined.ExitToApp, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Выйти")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showSettingsMenu = false }
+                ) {
+                    Text("Закрыть")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 
+// Классы данных
+data class RecommendedModule(
+    val id: String,
+    val title: String,
+    val description: String,
+    val icon: ImageVector,
+    val color: Color
+)
+
+data class Achievement(
+    val id: String,
+    val title: String,
+    val description: String,
+    val icon: ImageVector,
+    val achieved: Boolean
+)
+
+// Компоненты
 @Composable
 fun StatItem(
     value: String,
@@ -775,47 +1055,6 @@ fun StatItem(
     }
 }
 
-// Остальные компоненты остаются без изменений...
-
-data class RecommendedModule(
-    val id: String,
-    val title: String,
-    val description: String,
-    val icon: ImageVector,
-    val color: Color
-)
-
-val recommendedModules = listOf(
-    RecommendedModule(
-        id = "practice",
-        title = "Практика",
-        description = "Решайте задачи",
-        icon = Icons.Rounded.Code,
-        color = Color(0xFF6366F1)
-    ),
-    RecommendedModule(
-        id = "quiz",
-        title = "Тесты",
-        description = "Проверьте знания",
-        icon = Icons.Rounded.Quiz,
-        color = Color(0xFF10B981)
-    ),
-    RecommendedModule(
-        id = "interview",
-        title = "Собеседование",
-        description = "Подготовка к собесу",
-        icon = Icons.Rounded.WorkspacePremium,
-        color = Color(0xFFF59E0B)
-    ),
-    RecommendedModule(
-        id = "full_course",
-        title = "Полный курс",
-        description = "Все уроки",
-        icon = Icons.Rounded.School,
-        color = Color(0xFF8B5CF6)
-    )
-)
-
 @Composable
 fun RecommendedModuleCard(
     module: RecommendedModule,
@@ -850,10 +1089,7 @@ fun RecommendedModuleCard(
                     modifier = Modifier.size(24.dp)
                 )
             }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     module.title,
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
@@ -865,93 +1101,6 @@ fun RecommendedModuleCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun DailyGoalCard(
-    completed: Int,
-    total: Int,
-    onComplete: () -> Unit
-) {
-    val progress = completed.toFloat() / total.toFloat()
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surface,
-        onClick = onComplete,
-        tonalElevation = 2.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        "Ежедневная цель",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        "Выполните $total заданий за день",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "$completed/$total",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            LinearProgressIndicator(
-                progress = progress,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.primaryContainer
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "Прогресс",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    "${(progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
@@ -1007,10 +1156,7 @@ fun LearningPathCard(
                         modifier = Modifier.size(28.dp)
                     )
                 }
-
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         title,
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
@@ -1022,16 +1168,13 @@ fun LearningPathCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
                 Icon(
                     Icons.Default.ArrowForward,
                     contentDescription = "Начать",
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-
             Spacer(modifier = Modifier.height(16.dp))
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -1047,9 +1190,7 @@ fun LearningPathCard(
                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
                 )
             }
-
             Spacer(modifier = Modifier.height(16.dp))
-
             LinearProgressIndicator(
                 progress = progress,
                 modifier = Modifier
@@ -1059,9 +1200,7 @@ fun LearningPathCard(
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
             )
-
             Spacer(modifier = Modifier.height(8.dp))
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -1113,45 +1252,6 @@ fun CourseInfoItem(
     }
 }
 
-data class Achievement(
-    val title: String,
-    val description: String,
-    val icon: ImageVector,
-    val achieved: Boolean,
-    val xpReward: Int
-)
-
-val achievements = listOf(
-    Achievement(
-        title = "Первый код",
-        description = "Напишите первую программу",
-        icon = Icons.Rounded.Code,
-        achieved = false,
-        xpReward = 50
-    ),
-    Achievement(
-        title = "Ученик",
-        description = "Пройдите 10 уроков",
-        icon = Icons.Rounded.School,
-        achieved = false,
-        xpReward = 100
-    ),
-    Achievement(
-        title = "Тестировщик",
-        description = "Ответьте на 20 вопросов",
-        icon = Icons.Rounded.Quiz,
-        achieved = false,
-        xpReward = 150
-    ),
-    Achievement(
-        title = "Профессионал",
-        description = "Завершите все уроки курса",
-        icon = Icons.Rounded.WorkspacePremium,
-        achieved = false,
-        xpReward = 500
-    )
-)
-
 @Composable
 fun AchievementBadge(
     achievement: Achievement,
@@ -1159,7 +1259,7 @@ fun AchievementBadge(
 ) {
     Surface(
         modifier = Modifier
-            .width(160.dp),
+            .width(140.dp),
         shape = RoundedCornerShape(20.dp),
         color = if (achievement.achieved)
             MaterialTheme.colorScheme.secondaryContainer
@@ -1177,11 +1277,11 @@ fun AchievementBadge(
         ) {
             Box(
                 modifier = Modifier
-                    .size(60.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(
                         if (achievement.achieved)
-                            MaterialTheme.colorScheme.secondary
+                            Color(0xFFF59E0B)
                         else
                             MaterialTheme.colorScheme.surfaceVariant
                     ),
@@ -1194,13 +1294,10 @@ fun AchievementBadge(
                         MaterialTheme.colorScheme.onSecondary
                     else
                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     achievement.title,
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
@@ -1210,15 +1307,22 @@ fun AchievementBadge(
                         MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
-
-                Text(
-                    "+${achievement.xpReward} XP",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (achievement.achieved)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
+                if (!achievement.achieved) {
+                    Text(
+                        achievement.description,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = "Получено",
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
     }
@@ -1262,27 +1366,6 @@ fun StatCard(
             textAlign = TextAlign.Center
         )
     }
-}
-
-// Функция расчёта уровня по XP
-fun calculateLevel(totalXP: Int): Int {
-    if (totalXP < 100) return 1
-    if (totalXP < 250) return 2
-    if (totalXP < 450) return 3
-    if (totalXP < 700) return 4
-    if (totalXP < 1000) return 5
-
-    var xp = totalXP
-    var level = 1
-    var xpForNextLevel = 100
-
-    while (xp >= xpForNextLevel) {
-        xp -= xpForNextLevel
-        level++
-        xpForNextLevel += 50
-    }
-
-    return level
 }
 
 @Composable
@@ -1332,7 +1415,6 @@ fun ThemeOption(
                         MaterialTheme.colorScheme.onSurface
                 )
             }
-
             if (selected) {
                 Icon(
                     Icons.Default.Check,

@@ -5,6 +5,4 @@ import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
 class DevPathApplication : Application() {
-    // УБРАТЬ создание ThemeRepository вручную!
-    // Hilt будет инжектировать его автоматически
 }

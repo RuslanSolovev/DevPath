@@ -1851,6 +1851,8 @@ fun main() {
                 hint = "Fluent builder возвращает this из каждого метода, позволяя строить цепочки вызовов. Метод apply в Kotlin упрощает этот паттерн",
                 topic = "dsl"
             ),
+
+
             PracticeTask(
                 id = "dsl_with_validation",
                 title = "DSL с валидацией и ограничениями",
@@ -2034,7 +2036,8 @@ fun main() {
                 topic = "dsl"
             ),
 
-// 13. functional - Функциональное программирование
+// Определение Either монады
+            // 13. functional - Функциональное программирование
             PracticeTask(
                 id = "monad_composition",
                 title = "Композиция монад (Option, Either)",
@@ -2193,27 +2196,29 @@ fun main() {
     
     // Сравнение с императивным стилем
     println("\nСравнение с императивным стилем:")
-    println("""
-                // Императивный стиль (громоздкий)
-                fun getUserEmailImperative(id: Int): String? {
-                    val user = findUser(id)
-                    if (user == null) return null
-                    val email = getUserEmail(user)
-                    if (email == null) return null
-                    return if (validateEmail(email)) email else null
-                }
+    println(""${'"'}
+        // Императивный стиль (громоздкий)
+        fun getUserEmailImperative(id: Int): String? {
+            val user = findUser(id)
+            if (user == null) return null
+            val email = getUserEmail(user)
+            if (email == null) return null
+            return if (validateEmail(email)) email else null
+        }
 
-                // Функциональный стиль (лаконичный)
-                fun getUserEmailFunctional(id: Int) =
-                    findUser(id)
-                        .flatMap(::getUserEmail)
-                        .flatMap(::validateEmail)
-                """.trimIndent())
+        // Функциональный стиль (лаконичный)
+        fun getUserEmailFunctional(id: Int) =
+            findUser(id)
+                .flatMap(::getUserEmail)
+                .flatMap(::validateEmail)
+        ""${'"'}.trimIndent())
 }""".trimIndent(),
                 solution = "",
                 hint = "Монады позволяют строить цепочки вычислений, где каждый шаг может завершиться неудачей. flatMap обрабатывает успех/неудачу предыдущего шага",
                 topic = "functional"
             ),
+
+
             PracticeTask(
                 id = "recursion_patterns",
                 title = "Паттерны рекурсии и оптимизации",
@@ -2534,6 +2539,8 @@ fun main() = runBlocking {
                 hint = "Корутины должны быть кооперативными для правильной отмены. Используйте yield(), delay() или ensureActive() для проверки отмены",
                 topic = "coroutines_basics"
             ),
+
+
             PracticeTask(
                 id = "coroutine_dispatchers_context",
                 title = "Диспетчеры и контекст выполнения",
