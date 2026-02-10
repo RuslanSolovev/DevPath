@@ -63,14 +63,18 @@ fun DevPathNavGraph() {
                     navController.navigate("profile")
                 },
                 onNavigateToPractice = {
+                    // Переход к вкладкам на экране tabs
                     navController.navigate("tabs")
                 },
                 onNavigateToQuiz = {
+                    // Переход к вкладкам на экране tabs
                     navController.navigate("tabs")
                 },
                 onNavigateToInterview = {
+                    // Переход к вкладкам на экране tabs
                     navController.navigate("tabs")
-                }
+                },
+                parentNavController = navController // Передаем навигатор для вкладок
             )
         }
 
@@ -78,6 +82,7 @@ fun DevPathNavGraph() {
             ProfileScreen(
                 navController = navController,
                 onNavigateToTabs = {
+                    // Возврат на главную вкладку dashboard
                     navController.popBackStack("dashboard", false)
                 }
             )
@@ -95,12 +100,14 @@ fun DevPathNavGraph() {
             )
         }
 
+        // Экран уроков (можно открыть из вкладок или с главной)
         composable("lessons") {
             LessonListScreen(onLessonClick = { lessonId ->
                 navController.navigate("lesson/$lessonId")
             })
         }
 
+        // Экран урока
         composable(
             route = "lesson/{lessonId}",
             arguments = listOf(navArgument("lessonId") { type = NavType.StringType })
@@ -126,6 +133,7 @@ fun DevPathNavGraph() {
             )
         }
 
+        // Экран практических заданий
         composable(
             route = "practice/{taskId}",
             arguments = listOf(navArgument("taskId") { type = NavType.StringType })
@@ -140,6 +148,7 @@ fun DevPathNavGraph() {
             )
         }
 
+        // Экран отдельного вопроса теста
         composable(
             route = "quiz/question/{questionId}",
             arguments = listOf(navArgument("questionId") { type = NavType.StringType })
@@ -154,6 +163,7 @@ fun DevPathNavGraph() {
             )
         }
 
+        // Общий тест
         composable("quiz/general_test") {
             val allQuestions = QuizRepository.getQuizQuestions()
             val randomQuestions = remember(allQuestions) {
@@ -176,6 +186,7 @@ fun DevPathNavGraph() {
             )
         }
 
+        // Результаты теста
         composable(
             route = "quiz/test_results/{correct}/{total}",
             arguments = listOf(
@@ -195,7 +206,8 @@ fun DevPathNavGraph() {
                     }
                 },
                 onBackToMain = {
-                    navController.navigate("tabs") {
+                    // Возвращаемся на главную вкладку dashboard
+                    navController.navigate("dashboard") {
                         popUpTo("quiz/test_results/{correct}/{total}") { inclusive = true }
                         launchSingleTop = true
                     }

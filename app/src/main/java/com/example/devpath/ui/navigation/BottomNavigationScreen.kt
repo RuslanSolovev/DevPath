@@ -45,7 +45,7 @@ fun BottomNavigationScreen(
                 }
                 BottomTab.PRACTICE -> PracticeScreen(parentNavController = parentNavController)
                 BottomTab.QUIZ -> QuizScreen(parentNavController = parentNavController)
-                BottomTab.INTERVIEW -> InterviewScreen()
+                BottomTab.INTERVIEW -> InterviewScreen() // Убрали параметры, так как InterviewScreen теперь не принимает их
             }
         }
     }
