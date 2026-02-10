@@ -42,8 +42,6 @@ fun PracticeScreen(
     val tasks = PracticeRepository.getPracticeTasks()
     val currentUser = Firebase.auth.currentUser
 
-
-
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
 
@@ -67,46 +65,14 @@ fun PracticeScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "Практика Kotlin",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        if (!isLoading) {
-                            val completedCount = tasks.count { task ->
-                                completedTasks.contains(task.id)
-                            }
-                            Text(
-                                "$completedCount из ${tasks.size} заданий пройдено",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            Text(
-                                "Загрузка прогресса...",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
-                )
-            )
-        }
-    ) { paddingValues ->
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         if (isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
@@ -116,21 +82,41 @@ fun PracticeScreen(
                 task to completedTasks.contains(task.id)
             }
 
+            val (completed, notCompleted) = remember(tasksWithCompletion) {
+                tasksWithCompletion.partition { it.second }
+            }
+
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .background(MaterialTheme.colorScheme.background),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Заголовок экрана
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    ) {
+                        Text(
+                            "Практика Kotlin",
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Text(
+                            "${completed.size} из ${tasks.size} заданий пройдено",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 item {
                     // Баннер вдохновения
                     PracticeBanner()
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-
-                val (completed, notCompleted) = tasksWithCompletion.partition { it.second }
 
                 if (completed.isNotEmpty()) {
                     item {

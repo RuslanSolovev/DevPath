@@ -41,7 +41,6 @@ fun LessonListScreen(
     val lessons = LessonRepository.getLessons()
     val currentUser = Firebase.auth.currentUser
 
-
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
 
@@ -93,71 +92,53 @@ fun LessonListScreen(
         }.sortedBy { it.order }
     }
 
-    Scaffold(
-        topBar = {
-            SmallTopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            "Уроки Kotlin",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        if (!isLoading) {
-                            val completedCount = lessonsWithCompletion.count { it.isCompleted }
-                            Text(
-                                "$completedCount из ${lessons.size} уроков пройдено",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            Text(
-                                "Загрузка прогресса...",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.smallTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
-                ),
-                actions = {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    }
-                }
-            )
-        }
-    ) { paddingValues ->
+    // Проверяем, есть ли завершенные и незавершенные уроки
+    val (completed, notCompleted) = remember(lessonsWithCompletion) {
+        lessonsWithCompletion.partition { it.isCompleted }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         if (isLoading) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
             }
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .background(MaterialTheme.colorScheme.background),
+                modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // Группируем уроки по завершенности
-                val (completed, notCompleted) = lessonsWithCompletion.partition { it.isCompleted }
+                // Заголовок экрана
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 8.dp)
+                    ) {
+                        Text(
+                            "Уроки Kotlin",
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        Text(
+                            "${completed.size} из ${lessons.size} уроков пройдено",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
                 if (completed.isNotEmpty()) {
                     item {
