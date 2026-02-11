@@ -1,7 +1,6 @@
 @file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 package com.example.devpath.ui
 
-
 import android.content.res.Configuration
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -219,7 +218,7 @@ private val recommendedModules = listOf(
 @Composable
 fun DashboardScreen(
     onSignOut: () -> Unit,
-    onNavigateToTabs: () -> Unit,
+    onNavigateToTabs: (initialTab: String) -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToPractice: () -> Unit = {},
     onNavigateToQuiz: () -> Unit = {},
@@ -422,7 +421,7 @@ fun DashboardScreen(
 fun HomeTopAppBar(
     onSettingsClick: () -> Unit,
     onMotivationalPhraseClick: () -> Unit,
-    onNavigateToTabs: () -> Unit,
+    onNavigateToTabs: (initialTab: String) -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToPractice: () -> Unit,
     onNavigateToQuiz: () -> Unit,
@@ -566,7 +565,7 @@ fun HomeDashboardContent(
     onNavigateToPractice: () -> Unit,
     onNavigateToQuiz: () -> Unit,
     onNavigateToInterview: () -> Unit,
-    onNavigateToTabs: () -> Unit,
+    onNavigateToTabs: (initialTab: String) -> Unit,
     currentMotivationalPhrase: String,
     showMotivationalToast: Boolean,
     onMotivationalPhraseClick: () -> Unit,
@@ -988,7 +987,7 @@ fun HomeDashboardContent(
                                             "practice" -> onNavigateToPractice()
                                             "quiz" -> onNavigateToQuiz()
                                             "interview" -> onNavigateToInterview()
-                                            "full_course" -> onNavigateToTabs()
+                                            "full_course" -> onNavigateToTabs("learning")
                                         }
                                     }
                                 )
@@ -1009,7 +1008,7 @@ fun HomeDashboardContent(
                                 "Ваш путь обучения",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                             )
-                            TextButton(onClick = onNavigateToTabs) {
+                            TextButton(onClick = { onNavigateToTabs("learning") }) {
                                 Text("Смотреть все")
                             }
                         }
@@ -1020,7 +1019,7 @@ fun HomeDashboardContent(
                             duration = "",
                             lessonsCompleted = getCompletedLessonsCount(),
                             totalLessons = totalLessonsCount,
-                            onClick = onNavigateToTabs
+                            onClick = { onNavigateToTabs("learning") }
                         )
                     }
                 }

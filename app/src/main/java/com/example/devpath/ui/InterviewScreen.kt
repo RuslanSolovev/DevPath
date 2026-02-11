@@ -1,5 +1,4 @@
 @file:OptIn(ExperimentalFoundationApi::class)
-
 package com.example.devpath.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -46,21 +45,27 @@ import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InterviewScreen() {
-    val navController = rememberNavController()
+fun InterviewScreen(
+    parentNavController: NavHostController? = null
+) {
+    val childNavController = rememberNavController()
 
     NavHost(
-        navController = navController,
+        navController = childNavController,
         startDestination = "question_list"
     ) {
         composable("question_list") {
-            InterviewQuestionListScreen(navController)
+            InterviewQuestionListScreen(
+                parentNavController = parentNavController,
+                childNavController = childNavController
+            )
         }
 
         composable("question/{questionId}") { backStackEntry ->
             InterviewQuestionDetailScreen(
                 backStackEntry = backStackEntry,
-                navController = navController
+                parentNavController = parentNavController,
+                childNavController = childNavController
             )
         }
     }
@@ -69,7 +74,8 @@ fun InterviewScreen() {
 @Composable
 fun InterviewQuestionDetailScreen(
     backStackEntry: androidx.navigation.NavBackStackEntry,
-    navController: NavHostController
+    parentNavController: NavHostController?,
+    childNavController: NavHostController
 ) {
     val questionId = backStackEntry.arguments?.getString("questionId") ?: "iq1"
     val question = InterviewRepository.getQuestionById(questionId)
@@ -78,14 +84,12 @@ fun InterviewQuestionDetailScreen(
     val currentUser = Firebase.auth.currentUser
     val coroutineScope = rememberCoroutineScope()
 
-
-// Внутри @Composable функции:
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
 
     InterviewQuestionScreen(
         question = question,
-        onBack = { navController.popBackStack() },
+        onBack = { childNavController.popBackStack() },
         onToggleFavorite = { id ->
             if (currentUser != null) {
                 val isNowFavorite = !FavoritesRepository.isFavorite(id)
@@ -106,7 +110,10 @@ fun InterviewQuestionDetailScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun InterviewQuestionListScreen(navController: NavHostController) {
+fun InterviewQuestionListScreen(
+    parentNavController: NavHostController?,
+    childNavController: NavHostController
+) {
     val allQuestions = InterviewRepository.getInterviewQuestions()
     val favoriteQuestions by remember {
         derivedStateOf {
@@ -424,7 +431,7 @@ fun InterviewQuestionListScreen(navController: NavHostController) {
                     InterviewQuestionItem(
                         question = question,
                         onClick = { questionId ->
-                            navController.navigate("question/$questionId")
+                            childNavController.navigate("question/$questionId")
                         },
                         onToggleFavorite = { questionId ->
                             if (currentUser != null) {

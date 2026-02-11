@@ -33,10 +33,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LessonListScreen(
-    onLessonClick: (String) -> Unit
+    onLessonClick: (String) -> Unit,
 ) {
     val lessons = LessonRepository.getLessons()
     val currentUser = Firebase.auth.currentUser

@@ -12,10 +12,19 @@ import com.example.devpath.ui.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BottomNavigationScreen(
+    initialTab: String = "learning",
     onSignOut: () -> Unit,
     parentNavController: NavHostController
 ) {
-    var currentTab by remember { mutableStateOf(BottomTab.LEARNING) }
+    // Конвертируем строку в BottomTab
+    val initialBottomTab = when (initialTab.lowercase()) {
+        "practice" -> BottomTab.PRACTICE
+        "quiz" -> BottomTab.QUIZ
+        "interview" -> BottomTab.INTERVIEW
+        else -> BottomTab.LEARNING
+    }
+
+    var currentTab by remember { mutableStateOf(initialBottomTab) }
 
     Scaffold(
         bottomBar = {
@@ -45,7 +54,7 @@ fun BottomNavigationScreen(
                 }
                 BottomTab.PRACTICE -> PracticeScreen(parentNavController = parentNavController)
                 BottomTab.QUIZ -> QuizScreen(parentNavController = parentNavController)
-                BottomTab.INTERVIEW -> InterviewScreen() // Убрали параметры, так как InterviewScreen теперь не принимает их
+                BottomTab.INTERVIEW -> InterviewScreen(parentNavController = parentNavController)
             }
         }
     }
