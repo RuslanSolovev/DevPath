@@ -1,6 +1,9 @@
+# gradle/libs.versions.toml
 [versions]
 agp = "8.3.1"
 kotlin = "1.9.24"
+kotlin-serialization = "1.6.0"
+gson = "2.10.1"
 
 # AndroidX версии
 coreKtx = "1.12.0"
@@ -9,7 +12,7 @@ junitVersion = "1.1.5"
 espressoCore = "3.5.1"
 lifecycleRuntimeKtx = "2.6.2"
 activityCompose = "1.8.2"
-composeBom = "2024.02.00"  # ОБНОВЛЕНО: была 2023.08.00
+composeBom = "2024.02.00"
 composeCompiler = "1.5.14"
 navVersion = "2.7.7"
 lifecycleVersion = "2.6.2"
@@ -18,13 +21,14 @@ coroutines = "1.7.3"
 coroutinesPlayServices = "1.7.3"
 
 # Firebase
-firebaseBom = "32.7.2"  # ОБНОВЛЕНО
+firebaseBom = "32.7.2"
 
 # Hilt
 hilt = "2.48"
 
 # Другие библиотеки
 coil = "2.5.0"
+okhttp = "4.11.0"  # ← ДОБАВИТЬ для OkHttp
 
 [libraries]
 # Core Android
@@ -44,6 +48,8 @@ androidx-material3 = { module = "androidx.compose.material3:material3" }
 
 # Navigation
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navVersion" }
+
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 
 # ViewModel для Compose
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleVersion" }
@@ -77,6 +83,13 @@ coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
 # DataStore (настройки)
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version = "1.0.0" }
 
+# Kotlin Serialization
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlin-serialization" }
+
+# OkHttp
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+okhttp-logging-interceptor = { module = "com.squareup.okhttp3:logging-interceptor", version.ref = "okhttp" }
+
 # Тестирование Compose
 androidx-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 androidx-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
@@ -91,6 +104,7 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
 google-services = { id = "com.google.gms.google-services", version = "4.4.0" }
 dagger-hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }  # ← ДОБАВИТЬ эту строку
 
 [bundles]
 # Опционально: можно создать бандлы для группировки зависимостей

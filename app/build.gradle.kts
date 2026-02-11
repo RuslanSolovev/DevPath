@@ -1,9 +1,11 @@
+// app/build.gradle.kts
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.kapt)  // ДОБАВЛЯЕМ: для обработки аннотаций
-    alias(libs.plugins.google.services)  // ДОБАВЛЯЕМ: Firebase Google Services
-    alias(libs.plugins.dagger.hilt.android)  // ДОБАВЛЯЕМ: Hilt для DI
+    alias(libs.plugins.kotlin.kapt)
+    alias(libs.plugins.google.services)
+    alias(libs.plugins.dagger.hilt.android)
+    alias(libs.plugins.kotlin.serialization) // ← ДОБАВИТЬ эту строку!
 }
 
 android {
@@ -65,46 +67,58 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
-    // Jetpack Compose Navigation
-    implementation(libs.androidx.navigation.compose)  // ДОБАВЛЯЕМ: Навигация
+    // Для работы с API
+    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
 
+    // Kotlin Serialization - ИСПРАВЬТЕ ЭТУ СТРОКУ
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+
+    // Coroutines - ИСПРАВЬТЕ ЭТУ СТРОКУ (убрать лишнюю кавычку)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // Jetpack Compose Navigation
+    implementation(libs.androidx.navigation.compose)
+
+    implementation(libs.gson)
 
     // Lifecycle ViewModel для Compose
-    implementation(libs.androidx.lifecycle.viewmodel.compose)  // ДОБАВЛЯЕМ
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     // Firebase
-    implementation(platform(libs.firebase.bom))  // ДОБАВЛЯЕМ: Firebase BOM
-    implementation(libs.firebase.auth)  // ДОБАВЛЯЕМ: Firebase Auth
-    implementation(libs.firebase.firestore)  // ДОБАВЛЯЕМ: Firestore
-    implementation(libs.firebase.storage)  // ДОБАВЛЯЕМ: Storage (опционально)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
 
     // Google Sign-In
-    implementation(libs.play.services.auth)  // ДОБАВЛЯЕМ
+    implementation(libs.play.services.auth)
 
-    // Material Icons Extended (для иконок типа MenuBook)
+    // Material Icons Extended
     implementation("androidx.compose.material:material-icons-extended:1.6.0")
 
     // Dependency Injection - Hilt
-    implementation(libs.hilt.android)  // ДОБАВЛЯЕМ
-    kapt(libs.hilt.compiler)  // ДОБАВЛЯЕМ: Компилятор Hilt
-    implementation(libs.androidx.hilt.navigation.compose)  // ДОБАВЛЯЕМ: Hilt для Compose
+    implementation(libs.hilt.android)
+    kapt(libs.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
 
     // Coroutines
-    implementation(libs.kotlinx.coroutines.android)  // ДОБАВЛЯЕМ
-    implementation(libs.kotlinx.coroutines.play.services)  // ДОБАВЛЯЕМ: для Firebase
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
 
-    // Room Database (для локального кэширования)
-    implementation(libs.androidx.room.runtime)  // ДОБАВЛЯЕМ
-    implementation(libs.androidx.room.ktx)  // ДОБАВЛЯЕМ
-    kapt(libs.androidx.room.compiler)  // ДОБАВЛЯЕМ
+    // Room Database
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    kapt(libs.androidx.room.compiler)
 
     // Coil для загрузки изображений
-    implementation(libs.coil.compose)  // ДОБАВЛЯЕМ
+    implementation(libs.coil.compose)
 
-    implementation ("com.google.code.gson:gson:2.10.1")
+    // Gson - можно удалить если используете Kotlin Serialization
+    // implementation("com.google.code.gson:gson:2.10.1")
 
     // DataStore для хранения настроек
-    implementation(libs.androidx.datastore.preferences)  // ДОБАВЛЯЕМ
+    implementation(libs.androidx.datastore.preferences)
 
     // Тестирование
     testImplementation(libs.junit)

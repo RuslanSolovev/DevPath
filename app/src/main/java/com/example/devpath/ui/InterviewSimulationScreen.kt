@@ -2,7 +2,11 @@ package com.example.devpath.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,25 +17,33 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import com.example.devpath.ui.viewmodel.InterviewViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InterviewSimulationScreen(
-    navController: NavHostController
+    navController: NavHostController,
+    viewModel: InterviewViewModel = hiltViewModel()
 ) {
     var currentStep by remember { mutableIntStateOf(0) }
     var isRecording by remember { mutableStateOf(false) }
     var userAnswer by remember { mutableStateOf("") }
     var interviewCompleted by remember { mutableStateOf(false) }
-    var answers by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var showAnalysisDialog by remember { mutableStateOf(false) }
+
+    val answers by viewModel.answers.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    val analysisResult by viewModel.analysisResult.collectAsState()
 
     val interviewSteps = listOf(
         InterviewStep(
             id = 1,
             title = "Введение",
             question = "Расскажите о себе и своем опыте в разработке на Kotlin.",
-            timeLimit = 180, // 3 минуты
+            timeLimit = 180,
             tips = listOf(
                 "Расскажите о вашем образовании и опыте",
                 "Упомяните ключевые проекты",
@@ -43,7 +55,7 @@ fun InterviewSimulationScreen(
             id = 2,
             title = "Базовые концепции",
             question = "Объясните разницу между val и var, а также между class и data class в Kotlin.",
-            timeLimit = 120, // 2 минуты
+            timeLimit = 120,
             tips = listOf(
                 "val - неизменяемая ссылка, var - изменяемая",
                 "data class автоматически генерирует методы",
@@ -54,7 +66,7 @@ fun InterviewSimulationScreen(
             id = 3,
             title = "Корутины",
             question = "Что такое корутины и как они отличаются от потоков? Объясните разницу между launch и async.",
-            timeLimit = 180, // 3 минуты
+            timeLimit = 180,
             tips = listOf(
                 "Корутины легковеснее потоков",
                 "launch - для fire-and-forget операций",
@@ -66,7 +78,7 @@ fun InterviewSimulationScreen(
             id = 4,
             title = "Архитектура",
             question = "Опишите ваш опыт работы с MVVM/MVI архитектурой в Android. Как вы реализуете ViewModel?",
-            timeLimit = 150, // 2.5 минуты
+            timeLimit = 150,
             tips = listOf(
                 "Объясните паттерн Observer",
                 "Расскажите про LiveData/StateFlow",
@@ -77,7 +89,7 @@ fun InterviewSimulationScreen(
             id = 5,
             title = "Практическая задача",
             question = "Напишите функцию, которая находит все пары чисел в массиве, сумма которых равна заданному числу. Оцените сложность алгоритма.",
-            timeLimit = 300, // 5 минут
+            timeLimit = 300,
             tips = listOf(
                 "Можно использовать HashMap для O(n) решения",
                 "Обсудите trade-offs разных подходов",
@@ -88,7 +100,7 @@ fun InterviewSimulationScreen(
             id = 6,
             title = "Вопросы к компании",
             question = "Есть ли у вас вопросы к нам о компании или процессе работы?",
-            timeLimit = 120, // 2 минуты
+            timeLimit = 120,
             tips = listOf(
                 "Спросите о стеке технологий",
                 "Узнайте о процессе разработки",
@@ -97,6 +109,77 @@ fun InterviewSimulationScreen(
             )
         )
     )
+
+    // Загрузка сохраненных ответов
+    LaunchedEffect(Unit) {
+        viewModel.loadAnswers()
+    }
+
+    // Обработка ошибок
+    error?.let { errorMessage ->
+        LaunchedEffect(errorMessage) {
+            println("Interview error: $errorMessage")
+        }
+    }
+
+    // Диалог анализа ответа
+    if (showAnalysisDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showAnalysisDialog = false
+                viewModel.clearAnalysis()
+            },
+            title = {
+                Text(
+                    "Анализ GigaChat", // ← Изменено
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(4.dp)
+                ) {
+                    if (isLoading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator()
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("GigaChat анализирует ваш ответ...") // ← Изменено
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = analysisResult ?: "Нет данных для анализа",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAnalysisDialog = false
+                        viewModel.clearAnalysis()
+                    }
+                ) {
+                    Text("Закрыть")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -124,15 +207,14 @@ fun InterviewSimulationScreen(
                         Button(
                             onClick = {
                                 if (currentStep > 0) {
-                                    // Сохраняем ответ
                                     if (userAnswer.isNotBlank()) {
-                                        answers = answers + (currentStep to userAnswer)
+                                        viewModel.saveAnswer(currentStep, userAnswer)
                                     }
                                     currentStep--
                                     userAnswer = answers[currentStep] ?: ""
                                 }
                             },
-                            enabled = currentStep > 0
+                            enabled = currentStep > 0 && !isLoading
                         ) {
                             Text("Назад")
                         }
@@ -140,7 +222,7 @@ fun InterviewSimulationScreen(
                         Button(
                             onClick = {
                                 if (userAnswer.isNotBlank()) {
-                                    answers = answers + (currentStep to userAnswer)
+                                    viewModel.saveAnswer(currentStep, userAnswer)
                                 }
 
                                 if (currentStep < interviewSteps.size - 1) {
@@ -149,12 +231,20 @@ fun InterviewSimulationScreen(
                                 } else {
                                     interviewCompleted = true
                                 }
-                            }
+                            },
+                            enabled = !isLoading
                         ) {
-                            Text(
-                                if (currentStep == interviewSteps.size - 1) "Завершить"
-                                else "Далее"
-                            )
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text(
+                                    if (currentStep == interviewSteps.size - 1) "Завершить"
+                                    else "Далее"
+                                )
+                            }
                         }
                     }
                 }
@@ -275,7 +365,8 @@ fun InterviewSimulationScreen(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
                             unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                        )
+                        ),
+                        enabled = !isLoading
                     )
 
                     Row(
@@ -289,7 +380,8 @@ fun InterviewSimulationScreen(
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isRecording) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.primary
-                            )
+                            ),
+                            enabled = !isLoading
                         ) {
                             Icon(
                                 if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
@@ -301,14 +393,30 @@ fun InterviewSimulationScreen(
 
                         Button(
                             onClick = {
-                                // TODO: Анализ ответа ИИ
-                                // Пока просто покажем сообщение
-                                // В реальном приложении здесь будет интеграция с ИИ
-                            }
+                                if (userAnswer.isNotBlank()) {
+                                    // Сохраняем ответ
+                                    viewModel.saveAnswer(currentStep, userAnswer)
+                                    // Анализируем через GigaChat
+                                    viewModel.analyzeAnswer(
+                                        question = step.question,
+                                        userAnswer = userAnswer,
+                                        tips = step.tips
+                                    )
+                                    showAnalysisDialog = true
+                                }
+                            },
+                            enabled = userAnswer.isNotBlank() && !isLoading
                         ) {
-                            Icon(Icons.Default.Analytics, contentDescription = "Анализ")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Проверить ответ")
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Analytics, contentDescription = "Анализ")
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Проверить ответ")
+                            }
                         }
                     }
                 }
@@ -334,7 +442,8 @@ fun InterviewSimulationScreen(
                             "• Будьте конкретны и структурированы\n" +
                                     "• Приводите примеры из реального опыта\n" +
                                     "• Не бойтесь говорить о сложностях и как вы их преодолели\n" +
-                                    "• Задавайте уточняющие вопросы если нужно",
+                                    "• Задавайте уточняющие вопросы если нужно\n" +
+                                    "• Используйте кнопку 'Проверить ответ' для ИИ-анализа от GigaChat", // ← Изменено
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                             modifier = Modifier.padding(top = 4.dp)
@@ -342,7 +451,7 @@ fun InterviewSimulationScreen(
                     }
                 }
             } else {
-                // Экран завершения
+                // Экран завершения (без изменений, только текст про GigaChat)
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -388,39 +497,49 @@ fun InterviewSimulationScreen(
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
 
-                            interviewSteps.forEachIndexed { index, step ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column {
-                                        Text(
-                                            "Вопрос ${index + 1}: ${step.title}",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                        Text(
-                                            if (answers.containsKey(index)) "✓ Ответ записан" else "✗ Без ответа",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (answers.containsKey(index))
+                            LazyColumn {
+                                items(interviewSteps) { step ->
+                                    val answer = answers[step.id - 1]
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                "Вопрос ${step.id}: ${step.title}",
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Text(
+                                                if (answer != null) {
+                                                    "✓ Ответ записан (${answer.length} символов)"
+                                                } else {
+                                                    "✗ Без ответа"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (answer != null)
+                                                    Color(0xFF10B981)
+                                                else
+                                                    MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                        Icon(
+                                            if (answer != null) Icons.Default.Check else Icons.Default.Info,
+                                            contentDescription = null,
+                                            tint = if (answer != null)
                                                 Color(0xFF10B981)
                                             else
-                                                MaterialTheme.colorScheme.error
+                                                MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(24.dp)
                                         )
                                     }
-                                    Icon(
-                                        if (answers.containsKey(index)) Icons.Default.Check else Icons.Default.Info,
-                                        contentDescription = null,
-                                        tint = if (answers.containsKey(index))
-                                            Color(0xFF10B981)
-                                        else
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                if (index < interviewSteps.size - 1) {
-                                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                    if (step.id < interviewSteps.size) {
+                                        Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                    }
                                 }
                             }
                         }
@@ -437,7 +556,8 @@ fun InterviewSimulationScreen(
                             onClick = {
                                 currentStep = 0
                                 userAnswer = ""
-                                answers = emptyMap()
+                                viewModel.clearAnswers()
+                                viewModel.clearAnalysis()
                                 interviewCompleted = false
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -447,11 +567,16 @@ fun InterviewSimulationScreen(
 
                         OutlinedButton(
                             onClick = {
-                                // TODO: Показать детальный анализ
+                                viewModel.analyzeFullInterview(
+                                    interviewSteps = interviewSteps,
+                                    answers = answers
+                                )
+                                showAnalysisDialog = true
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = answers.isNotEmpty()
                         ) {
-                            Text("Посмотреть анализ ответов")
+                            Text("Полный анализ собеседования от GigaChat") // ← Изменено
                         }
 
                         TextButton(

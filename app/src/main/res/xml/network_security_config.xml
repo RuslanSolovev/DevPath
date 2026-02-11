@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Разрешаем HTTP для разработки -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">ngw.devices.sberbank.ru</domain>
+        <domain includeSubdomains="true">gigachat.devices.sberbank.ru</domain>
+    </domain-config>
+
+    <!-- DEBUG MODE - РАЗРЕШАЕМ ВСЕ СЕРТИФИКАТЫ -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+            <!-- Доверяем ВСЕМ сертификатам в debug режиме -->
+            <certificates src="system" overridePins="true" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

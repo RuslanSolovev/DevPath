@@ -1,8 +1,11 @@
+// ui/ChatWithAIScreen.kt
 package com.example.devpath.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -13,24 +16,56 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import com.example.devpath.domain.models.AIMessage
+import com.example.devpath.ui.viewmodel.ChatViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatWithAIScreen(
-    navController: NavHostController
+    navController: NavHostController,
+    viewModel: ChatViewModel = hiltViewModel()
 ) {
     var message by remember { mutableStateOf("") }
-    val messages = remember { mutableStateListOf<AIMessage>() }
+    val messages by viewModel.messages.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // Автопрокрутка при новых сообщениях
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(0)
+        }
+    }
+
+    // Показ ошибок
+    error?.let { errorMessage ->
+        LaunchedEffect(errorMessage) {
+            println("Chat error: $errorMessage")
+        }
+    }
 
     Scaffold(
         topBar = {
             SmallTopAppBar(
-                title = { Text("Чат с ИИ-помощником") },
+                title = { Text("Чат с GigaChat") }, // ← Изменено
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    if (messages.isNotEmpty()) {
+                        IconButton(
+                            onClick = { viewModel.clearChat() },
+                            enabled = !isLoading
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Очистить чат")
+                        }
                     }
                 }
             )
@@ -51,20 +86,21 @@ fun ChatWithAIScreen(
                 ) {
                     Icon(
                         Icons.Default.SmartToy,
-                        contentDescription = "ИИ Помощник",
+                        contentDescription = "GigaChat Помощник",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(80.dp)
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
-                        "ИИ-помощник по Kotlin",
+                        "GigaChat помощник по Kotlin", // ← Изменено
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         "Задайте мне вопросы по программированию на Kotlin, " +
-                                "я помогу с объяснениями, кодом и советами!",
+                                "я помогу с объяснениями, кодом и советами!\n\n" +
+                                "Используется GigaChat от Сбера", // ← Изменено
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center
                     )
@@ -78,21 +114,19 @@ fun ChatWithAIScreen(
                     ) {
                         ExampleQuestionButton(
                             text = "Объясни разницу между val и var",
-                            onClick = {
-                                message = "Объясни разницу между val и var в Kotlin"
-                            }
+                            onClick = { viewModel.handleExampleQuestion("val_var") }
                         )
                         ExampleQuestionButton(
                             text = "Покажи пример функции высшего порядка",
-                            onClick = {
-                                message = "Покажи пример функции высшего порядка в Kotlin"
-                            }
+                            onClick = { viewModel.handleExampleQuestion("higher_order") }
                         )
                         ExampleQuestionButton(
                             text = "Что такое корутины?",
-                            onClick = {
-                                message = "Что такое корутины в Kotlin и как их использовать?"
-                            }
+                            onClick = { viewModel.handleExampleQuestion("coroutines") }
+                        )
+                        ExampleQuestionButton(
+                            text = "Как подготовиться к собеседованию?",
+                            onClick = { viewModel.handleExampleQuestion("interview_tips") }
                         )
                     }
                 }
@@ -101,11 +135,43 @@ fun ChatWithAIScreen(
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     reverseLayout = true,
+                    state = listState,
                     contentPadding = PaddingValues(16.dp)
                 ) {
                     items(messages.reversed()) { msg ->
                         AIMessageItem(message = msg)
                         Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    // Индикатор загрузки
+                    if (isLoading) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = if (messages.lastOrNull()?.isUser == true)
+                                    Arrangement.End else Arrangement.Start
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    tonalElevation = 1.dp,
+                                    modifier = Modifier
+                                        .widthIn(max = 120.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("GigaChat думает...") // ← Изменено
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -127,24 +193,25 @@ fun ChatWithAIScreen(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     ),
+                    enabled = !isLoading,
                     trailingIcon = {
                         IconButton(
                             onClick = {
-                                if (message.isNotBlank()) {
-                                    messages.add(AIMessage(text = message, isUser = true))
-                                    // TODO: Вызов ИИ API
-                                    val botResponse = when {
-                                        message.contains("val") || message.contains("var") -> "В Kotlin:\n• `val` - неизменяемая ссылка (immutable), как final в Java\n• `var` - изменяемая ссылка (mutable)\n\nПример:\n```kotlin\nval name = \"Kotlin\" // нельзя изменить\nvar count = 0 // можно изменить\ncount = 5 // OK\nname = \"Java\" // Ошибка!```"
-                                        message.contains("функции высшего порядка") -> "Функция высшего порядка — это функция, которая принимает другие функции как параметры или возвращает функцию.\n\nПример:\n```kotlin\nfun calculate(x: Int, y: Int, operation: (Int, Int) -> Int): Int {\n    return operation(x, y)\n}\n\nval sum = calculate(5, 3) { a, b -> a + b } // 8\nval product = calculate(5, 3) { a, b -> a * b } // 15```"
-                                        message.contains("корутин") -> "Корутины в Kotlin — это легковесные потоки для асинхронного программирования. Они не блокируют основной поток и эффективно используют ресурсы.\n\nПример:\n```kotlin\nsuspend fun fetchData(): String {\n    delay(1000) // не блокирует поток\n    return \"Данные загружены\"\n}\n\n// Использование\nviewModelScope.launch {\n    val data = fetchData()\n    updateUI(data)\n}```"
-                                        else -> "Я помогу вам с изучением Kotlin! Задайте более конкретный вопрос, например: 'Как работает наследование в Kotlin?' или 'Покажи пример RecyclerView'"
-                                    }
-                                    messages.add(AIMessage(text = botResponse, isUser = false))
+                                if (message.isNotBlank() && !isLoading) {
+                                    viewModel.sendMessage(message)
                                     message = ""
                                 }
-                            }
+                            },
+                            enabled = message.isNotBlank() && !isLoading
                         ) {
-                            Icon(Icons.Default.Send, contentDescription = "Отправить")
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Send, contentDescription = "Отправить")
+                            }
                         }
                     }
                 )
@@ -152,6 +219,8 @@ fun ChatWithAIScreen(
         }
     }
 }
+
+// ExampleQuestionButton и AIMessageItem остаются без изменений
 
 @Composable
 fun ExampleQuestionButton(
@@ -197,7 +266,6 @@ fun ExampleQuestionButton(
 
 @Composable
 fun AIMessageItem(message: AIMessage) {
-    val horizontalAlignment = if (message.isUser) Alignment.End else Alignment.Start
     val backgroundColor = if (message.isUser)
         MaterialTheme.colorScheme.primary
     else

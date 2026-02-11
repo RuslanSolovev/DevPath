@@ -1,6 +1,7 @@
 package com.example.devpath.di
 
 import android.content.Context
+import com.example.devpath.api.GigaChatService
 import com.example.devpath.data.local.AppDatabase
 import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.data.repository.ThemeRepository
@@ -36,13 +37,21 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideGigaChatService(): GigaChatService {
+        return GigaChatService()
+    }
+
+    @Provides
+    @Singleton
     fun provideProgressRepository(
         firestore: FirebaseFirestore,
         database: AppDatabase
     ): ProgressRepository {
         return ProgressRepository(
             db = firestore,
+
             localDb = database
         )
     }
+
 }
