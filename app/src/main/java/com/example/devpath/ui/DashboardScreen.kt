@@ -317,11 +317,14 @@ fun DashboardScreen(
                         onHideMotivationalToast = { showMotivationalToast = false }
                     )
                 }
+
+
                 MainTab.CHAT -> {
                     ChatWithAIScreen(
-                        navController = parentNavController
+                        onBackToHome = { currentTab = MainTab.HOME } // ← стрелка переключит на главную
                     )
                 }
+
                 MainTab.INTERVIEW_SIM -> {
                     InterviewSimulationScreen(
                         navController = parentNavController

@@ -114,6 +114,8 @@ dependencies {
     // Coil для загрузки изображений
     implementation(libs.coil.compose)
 
+    implementation("androidx.media:media:1.6.0")
+
     // Gson - можно удалить если используете Kotlin Serialization
     // implementation("com.google.code.gson:gson:2.10.1")
 

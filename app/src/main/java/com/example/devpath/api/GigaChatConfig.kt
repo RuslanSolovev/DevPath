@@ -9,19 +9,19 @@ object GigaChatConfig {
     const val CHAT_COMPLETION = "/chat/completions"
     const val AUTH_ENDPOINT = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 
-    // ===== ВАШИ ДАННЫЕ ИЗ ЛИЧНОГО КАБИНЕТА =====
-    // Client ID
+    // ===== ВАШИ НОВЫЕ ДАННЫЕ (созданы 11.02.2026) =====
+    // Client ID (остался тот же)
     const val CLIENT_ID = "3badd479-4ec7-4ff2-a8dd-53295bd83c9d"
 
-    // Client Secret (декодировано из Authorization Key)
-    const val CLIENT_SECRET = "5d0a3be0-d64e-4d78-b63d-a51415bb4d43"
+    // ⚠️ НОВЫЙ Client Secret! Старый: 5d0a3be0-d64e-4d78-b63d-a51415bb4d43
+    const val CLIENT_SECRET = "1a719a11-4b44-40c8-8010-bbee202f5197"
 
-    // Authorization Key (base64 от Client ID:Client Secret)
-    const val AUTH_KEY = "M2JhZGQ0NzktNGVjNy00ZmYyLWE4ZGQtNTMyOTViZDgzYzlkOjVkMGEzYmU0LWQ2NGUtNGQ3OC1iNjNkLWE1MTQxNWJiNGQ0Mw=="
+    // ⚠️ НОВЫЙ Authorization Key!
+    const val AUTH_KEY = "M2JhZGQ0NzktNGVjNy00ZmYyLWE4ZGQtNTMyOTViZDgzYzlkOjFhNzE5YTExLTRiNDQtNDBjOC04MDEwLWJiZWUyMDJmNTE5Nw=="
 
     // Scope
     const val SCOPE = "GIGACHAT_API_PERS"
-    // ============================================
+    // =================================================
 
     // Модели
     const val MODEL_GIGACHAT = "GigaChat"

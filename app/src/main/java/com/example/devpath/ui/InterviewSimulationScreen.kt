@@ -1,10 +1,13 @@
+// ui/InterviewSimulationScreen.kt
 package com.example.devpath.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -13,10 +16,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.example.devpath.ui.viewmodel.InterviewViewModel
@@ -131,7 +136,7 @@ fun InterviewSimulationScreen(
             },
             title = {
                 Text(
-                    "Анализ GigaChat", // ← Изменено
+                    "Анализ GigaChat",
                     fontWeight = FontWeight.Bold
                 )
             },
@@ -155,7 +160,7 @@ fun InterviewSimulationScreen(
                             ) {
                                 CircularProgressIndicator()
                                 Spacer(modifier = Modifier.height(16.dp))
-                                Text("GigaChat анализирует ваш ответ...") // ← Изменено
+                                Text("GigaChat анализирует ваш ответ...")
                             }
                         }
                     } else {
@@ -181,222 +186,312 @@ fun InterviewSimulationScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            SmallTopAppBar(
-                title = {
-                    Text(
-                        if (interviewCompleted) "Результаты собеседования"
-                        else "Симуляция собеседования"
+    // ✅ УБИРАЕМ SCAFFOLD, ИСПОЛЬЗУЕМ ЧИСТУЮ КОЛОНКУ!
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .imePadding() // Только для клавиатуры
+    ) {
+        // ✅ 1. ВЕРХНЯЯ ПАНЕЛЬ – КАСТОМНАЯ, ПРИЖАТА К ВЕРХУ
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            color = Color.Transparent,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 0.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start
+            ) {
+                // Кнопка назад – полный размер 56x56, без padding
+                IconButton(
+                    onClick = { navController.popBackStack() },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .padding(0.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Назад",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(24.dp)
                     )
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
-                    }
                 }
-            )
-        },
-        bottomBar = {
-            if (!interviewCompleted) {
-                BottomAppBar {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Button(
-                            onClick = {
-                                if (currentStep > 0) {
-                                    if (userAnswer.isNotBlank()) {
-                                        viewModel.saveAnswer(currentStep, userAnswer)
-                                    }
-                                    currentStep--
-                                    userAnswer = answers[currentStep] ?: ""
-                                }
-                            },
-                            enabled = currentStep > 0 && !isLoading
-                        ) {
-                            Text("Назад")
-                        }
 
-                        Button(
-                            onClick = {
-                                if (userAnswer.isNotBlank()) {
-                                    viewModel.saveAnswer(currentStep, userAnswer)
-                                }
-
-                                if (currentStep < interviewSteps.size - 1) {
-                                    currentStep++
-                                    userAnswer = answers[currentStep] ?: ""
-                                } else {
-                                    interviewCompleted = true
-                                }
-                            },
-                            enabled = !isLoading
-                        ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Text(
-                                    if (currentStep == interviewSteps.size - 1) "Завершить"
-                                    else "Далее"
-                                )
-                            }
-                        }
-                    }
-                }
+                Text(
+                    text = if (interviewCompleted) "Результаты собеседования" else "Симуляция собеседования",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 0.dp)
+                )
             }
         }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            if (!interviewCompleted) {
+
+        if (!interviewCompleted) {
+            // ✅ 2. ОСНОВНОЙ КОНТЕНТ – С WEIGHT, СЖИМАЕТСЯ ПРИ КЛАВИАТУРЕ
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+            ) {
                 val step = interviewSteps[currentStep]
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Прогресс
                 LinearProgressIndicator(
                     progress = { (currentStep + 1f) / interviewSteps.size },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Информация о текущем шаге
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Surface(
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    ) {
+                        Text(
+                            text = "Шаг ${currentStep + 1}/${interviewSteps.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
                     Text(
-                        "Шаг ${currentStep + 1}/${interviewSteps.size}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        "Вопрос ${step.id}/6",
+                        text = "Вопрос ${step.id}/6",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // Вопрос
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Заголовок
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = step.id.toString(),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = step.title,
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Вопрос
                         Text(
-                            step.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            step.question,
+                            text = step.question,
                             style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            lineHeight = 24.sp
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
 
                         // Подсказки
                         if (step.tips.isNotEmpty()) {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f)
                             ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(
-                                        "💡 Подсказки:",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    step.tips.forEach { tip ->
-                                        Text(
-                                            "• $tip",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            modifier = Modifier.padding(vertical = 2.dp)
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Lightbulb,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary,
+                                            modifier = Modifier.size(16.dp)
                                         )
+                                        Text(
+                                            text = "Подсказки:",
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+
+                                    step.tips.forEach { tip ->
+                                        Row(
+                                            verticalAlignment = Alignment.Top,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "•",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                            Text(
+                                                text = tip,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Лимит времени: ${step.timeLimit / 60} мин",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        // Лимит времени
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Timer,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Лимит времени: ${step.timeLimit / 60} мин",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 
+                Spacer(modifier = Modifier.height(16.dp))
+
                 // Ответ пользователя
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "Ваш ответ:",
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.padding(bottom = 8.dp)
+                        text = "Ваш ответ:",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     OutlinedTextField(
                         value = userAnswer,
                         onValueChange = { userAnswer = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Введите ваш ответ здесь...") },
-                        maxLines = 10,
-                        shape = RoundedCornerShape(12.dp),
+                        placeholder = {
+                            Text(
+                                text = "Введите ваш ответ здесь...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        },
+                        maxLines = 8,
+                        shape = RoundedCornerShape(16.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            cursorColor = MaterialTheme.colorScheme.primary
                         ),
                         enabled = !isLoading
                     )
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Кнопки действий
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Button(
+                        // Кнопка голосового ответа
+                        OutlinedButton(
                             onClick = { isRecording = !isRecording },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isRecording) MaterialTheme.colorScheme.error
-                                else MaterialTheme.colorScheme.primary
+                            enabled = !isLoading,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = if (isRecording)
+                                    MaterialTheme.colorScheme.error
+                                else
+                                    MaterialTheme.colorScheme.primary
                             ),
-                            enabled = !isLoading
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isRecording)
+                                    MaterialTheme.colorScheme.error
+                                else
+                                    MaterialTheme.colorScheme.primary
+                            )
                         ) {
                             Icon(
-                                if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
-                                contentDescription = if (isRecording) "Остановить запись" else "Начать запись"
+                                imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (isRecording) "Остановить" else "Голосовой ответ")
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isRecording) "Остановить" else "Голосовой ответ",
+                                style = MaterialTheme.typography.labelMedium
+                            )
                         }
 
+                        // Кнопка анализа
                         Button(
                             onClick = {
                                 if (userAnswer.isNotBlank()) {
-                                    // Сохраняем ответ
                                     viewModel.saveAnswer(currentStep, userAnswer)
-                                    // Анализируем через GigaChat
                                     viewModel.analyzeAnswer(
                                         question = step.question,
                                         userAnswer = userAnswer,
@@ -405,186 +500,363 @@ fun InterviewSimulationScreen(
                                     showAnalysisDialog = true
                                 }
                             },
-                            enabled = userAnswer.isNotBlank() && !isLoading
+                            enabled = userAnswer.isNotBlank() && !isLoading,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
                         ) {
                             if (isLoading) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
                                 )
                             } else {
-                                Icon(Icons.Default.Analytics, contentDescription = "Анализ")
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Проверить ответ")
+                                Icon(
+                                    imageVector = Icons.Default.Analytics,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Проверить ответ",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
                             }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 // Советы
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f)
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
+                    )
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            "📝 Советы для успешного ответа:",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.tertiary
-                        )
-                        Text(
-                            "• Будьте конкретны и структурированы\n" +
-                                    "• Приводите примеры из реального опыта\n" +
-                                    "• Не бойтесь говорить о сложностях и как вы их преодолели\n" +
-                                    "• Задавайте уточняющие вопросы если нужно\n" +
-                                    "• Используйте кнопку 'Проверить ответ' для ИИ-анализа от GigaChat", // ← Изменено
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                }
-            } else {
-                // Экран завершения (без изменений, только текст про GigaChat)
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = "Завершено",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(80.dp)
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        "Собеседование завершено!",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        "Вы ответили на ${answers.size} из ${interviewSteps.size} вопросов. " +
-                                "Это отличная практика перед реальным собеседованием!",
-                        style = MaterialTheme.typography.bodyLarge,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    // Статистика
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                "Ваши ответы сохранены",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 12.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(18.dp)
                             )
+                            Text(
+                                text = "📝 Советы для успешного ответа:",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
 
-                            LazyColumn {
-                                items(interviewSteps) { step ->
-                                    val answer = answers[step.id - 1]
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text(
-                                                "Вопрос ${step.id}: ${step.title}",
-                                                style = MaterialTheme.typography.bodyMedium
-                                            )
-                                            Text(
-                                                if (answer != null) {
-                                                    "✓ Ответ записан (${answer.length} символов)"
-                                                } else {
-                                                    "✗ Без ответа"
-                                                },
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (answer != null)
-                                                    Color(0xFF10B981)
-                                                else
-                                                    MaterialTheme.colorScheme.error
-                                            )
-                                        }
-                                        Icon(
-                                            if (answer != null) Icons.Default.Check else Icons.Default.Info,
-                                            contentDescription = null,
-                                            tint = if (answer != null)
-                                                Color(0xFF10B981)
-                                            else
-                                                MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                    if (step.id < interviewSteps.size) {
-                                        Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                    }
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            listOf(
+                                "Будьте конкретны и структурированы",
+                                "Приводите примеры из реального опыта",
+                                "Не бойтесь говорить о сложностях и как вы их преодолели",
+                                "Задавайте уточняющие вопросы если нужно",
+                                "Используйте кнопку 'Проверить ответ' для ИИ-анализа от GigaChat"
+                            ).forEach { tip ->
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "•",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Text(
+                                        text = tip,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
                         }
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(80.dp))
+            }
 
+            // ✅ 3. НИЖНЯЯ ПАНЕЛЬ – ПРИЖАТА К НИЗУ, БЕЗ ОТСТУПОВ!
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = 0.dp,
+                    bottomEnd = 0.dp
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Кнопка назад
+                    Button(
+                        onClick = {
+                            if (currentStep > 0) {
+                                if (userAnswer.isNotBlank()) {
+                                    viewModel.saveAnswer(currentStep, userAnswer)
+                                }
+                                currentStep--
+                                userAnswer = answers[currentStep] ?: ""
+                            }
+                        },
+                        enabled = currentStep > 0 && !isLoading,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Назад")
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    // Кнопка далее/завершить
+                    Button(
+                        onClick = {
+                            if (userAnswer.isNotBlank()) {
+                                viewModel.saveAnswer(currentStep, userAnswer)
+                            }
+
+                            if (currentStep < interviewSteps.size - 1) {
+                                currentStep++
+                                userAnswer = answers[currentStep] ?: ""
+                            } else {
+                                interviewCompleted = true
+                            }
+                        },
+                        enabled = !isLoading,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Text(
+                                text = if (currentStep == interviewSteps.size - 1) "Завершить" else "Далее"
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = if (currentStep == interviewSteps.size - 1)
+                                Icons.Default.Check
+                            else
+                                Icons.Default.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        } else {
+            // ✅ ЭКРАН ЗАВЕРШЕНИЯ – БЕЗ ИЗМЕНЕНИЙ
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                // ... код без изменений ...
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = "Завершено",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(80.dp)
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    "Собеседование завершено!",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Вы ответили на ${answers.size} из ${interviewSteps.size} вопросов. " +
+                            "Это отличная практика перед реальным собеседованием!",
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                currentStep = 0
-                                userAnswer = ""
-                                viewModel.clearAnswers()
-                                viewModel.clearAnalysis()
-                                interviewCompleted = false
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Пройти заново")
-                        }
+                        Text(
+                            "Ваши ответы сохранены",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
 
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.analyzeFullInterview(
-                                    interviewSteps = interviewSteps,
-                                    answers = answers
-                                )
-                                showAnalysisDialog = true
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = answers.isNotEmpty()
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 300.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("Полный анализ собеседования от GigaChat") // ← Изменено
+                            items(interviewSteps) { step ->
+                                val answer = answers[step.id - 1]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            "Вопрос ${step.id}: ${step.title}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            if (answer != null) {
+                                                "✓ Ответ записан (${answer.length} символов)"
+                                            } else {
+                                                "✗ Без ответа"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (answer != null)
+                                                Color(0xFF10B981)
+                                            else
+                                                MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                    Icon(
+                                        if (answer != null) Icons.Default.CheckCircle else Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = if (answer != null)
+                                            Color(0xFF10B981)
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                if (step.id < interviewSteps.size) {
+                                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                }
+                            }
                         }
+                    }
+                }
 
-                        TextButton(
-                            onClick = { navController.popBackStack() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Вернуться на главную")
-                        }
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            currentStep = 0
+                            userAnswer = ""
+                            viewModel.clearAnswers()
+                            viewModel.clearAnalysis()
+                            interviewCompleted = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Пройти заново")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.analyzeFullInterview(
+                                interviewSteps = interviewSteps,
+                                answers = answers
+                            )
+                            showAnalysisDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = answers.isNotEmpty(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Analytics,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Полный анализ собеседования")
+                    }
+
+                    TextButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Вернуться на главную")
                     }
                 }
             }

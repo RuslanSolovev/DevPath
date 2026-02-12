@@ -2,6 +2,7 @@ package com.example.devpath.di
 
 import android.content.Context
 import com.example.devpath.api.GigaChatService
+import com.example.devpath.api.speech.SaluteSpeechService
 import com.example.devpath.data.local.AppDatabase
 import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.data.repository.ThemeRepository
@@ -40,6 +41,13 @@ object AppModule {
     fun provideGigaChatService(): GigaChatService {
         return GigaChatService()
     }
+
+    @Provides
+    @Singleton
+    fun provideSaluteSpeechService(): SaluteSpeechService {
+        return SaluteSpeechService()
+    }
+
 
     @Provides
     @Singleton
