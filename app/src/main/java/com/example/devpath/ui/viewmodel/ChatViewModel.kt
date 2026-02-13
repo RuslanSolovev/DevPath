@@ -43,6 +43,10 @@ class ChatViewModel @Inject constructor(
 
     private val currentUserId = Firebase.auth.currentUser?.uid ?: "anonymous"
 
+    companion object {
+        const val MAX_HISTORY_MESSAGES = 50 // Максимум сообщений для контекста
+    }
+
     // Системный промпт
     private val systemPrompt = """
         Ты - эксперт по программированию на Kotlin и Android разработке.
@@ -75,7 +79,8 @@ class ChatViewModel @Inject constructor(
                         content = systemPrompt
                     ))
 
-                    val recentMessages = _messages.value.takeLast(10)
+                    // Берем последние N сообщений для контекста
+                    val recentMessages = _messages.value.takeLast(MAX_HISTORY_MESSAGES)
                     recentMessages.forEach { msg ->
                         add(GigaChatMessage(
                             role = if (msg.isUser) "user" else "assistant",
@@ -204,10 +209,9 @@ class ChatViewModel @Inject constructor(
                 _isLoading.value = true
                 _error.value = null
 
-                val messages = database.chatSessionDao().getMessages(sessionId)
-                // Это Flow, нужно собирать
-                messages.collect { storedMessages ->
-                    val loadedMessages = storedMessages.map {
+                val messagesFlow = database.chatSessionDao().getMessages(sessionId)
+                messagesFlow.collect { storedMessages ->
+                    val loadedMessages = storedMessages.sortedBy { it.orderIndex }.map {
                         AIMessage(
                             text = it.text,
                             isUser = it.isUser,
@@ -215,6 +219,14 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                     _messages.value = loadedMessages
+                    _savedSessionId.value = sessionId
+                    _success.value = "✅ Диалог загружен"
+
+                    viewModelScope.launch {
+                        delay(2000)
+                        _success.value = null
+                    }
+
                     println("📂 Чат загружен: ID=$sessionId, сообщений=${loadedMessages.size}")
                 }
 

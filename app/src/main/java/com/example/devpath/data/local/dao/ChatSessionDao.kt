@@ -9,8 +9,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ChatSessionDao {
 
+    // Для Flow (реактивное обновление)
     @Query("SELECT * FROM chat_sessions WHERE userId = :userId ORDER BY timestamp DESC")
     fun getAllSessions(userId: String): Flow<List<ChatSession>>
+
+    // Для suspend (однократная загрузка)
+    @Query("SELECT * FROM chat_sessions WHERE userId = :userId ORDER BY timestamp DESC")
+    suspend fun getAllSessionsSync(userId: String): List<ChatSession>
 
     @Query("SELECT * FROM chat_sessions WHERE id = :sessionId")
     suspend fun getSession(sessionId: Long): ChatSession?
@@ -26,6 +31,9 @@ interface ChatSessionDao {
 
     @Query("DELETE FROM chat_sessions WHERE userId = :userId")
     suspend fun deleteAllSessions(userId: String)
+
+    @Query("DELETE FROM chat_sessions WHERE id = :sessionId")
+    suspend fun deleteSessionById(sessionId: Long)
 
     @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY orderIndex ASC")
     fun getMessages(sessionId: Long): Flow<List<StoredMessage>>
