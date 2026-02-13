@@ -228,14 +228,16 @@ class ChatViewModel @Inject constructor(
                     }
 
                     println("📂 Чат загружен: ID=$sessionId, сообщений=${loadedMessages.size}")
+
+                    // ✅ ВАЖНО: Сбрасываем isLoading СРАЗУ после загрузки!
+                    _isLoading.value = false
                 }
 
             } catch (e: Exception) {
                 _error.value = "Ошибка загрузки: ${e.message}"
                 println("❌ Ошибка загрузки чата: ${e.message}")
                 e.printStackTrace()
-            } finally {
-                _isLoading.value = false
+                _isLoading.value = false // Сбрасываем даже при ошибке
             }
         }
     }
@@ -274,6 +276,14 @@ class ChatViewModel @Inject constructor(
                 println("❌ Ошибка удаления чата: ${e.message}")
             }
         }
+    }
+
+    /**
+     * ✅ ПРИНУДИТЕЛЬНО СБРОСИТЬ ЗАГРУЗКУ
+     */
+    fun forceResetLoading() {
+        _isLoading.value = false
+        println("🔄 Принудительный сброс isLoading")
     }
 
     /**

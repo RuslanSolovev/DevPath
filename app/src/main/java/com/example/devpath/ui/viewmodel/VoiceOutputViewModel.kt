@@ -2,7 +2,9 @@
 package com.example.devpath.ui.viewmodel
 
 import android.content.Context
-import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.devpath.api.speech.SaluteSpeechConfig
@@ -16,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 
 @HiltViewModel
@@ -58,58 +62,361 @@ class VoiceOutputViewModel @Inject constructor(
     private val _audioDuration = MutableStateFlow(0)
     val audioDuration: StateFlow<Int> = _audioDuration.asStateFlow()
 
-    // ✅ ДОБАВЛЕНО: ID текущего озвучиваемого сообщения
     private val _currentMessageId = MutableStateFlow<Long?>(null)
     val currentMessageId: StateFlow<Long?> = _currentMessageId.asStateFlow()
 
-    private var isPlaying = false
-    private var currentAudioData: ByteArray? = null
+    private val _cacheStats = MutableStateFlow("")
+    val cacheStats: StateFlow<String> = _cacheStats.asStateFlow()
 
-    // Константы
-    private companion object {
-        const val MAX_TEXT_LENGTH = 4000 // Максимум символов для TTS
-        const val CHUNK_DELAY_MS = 500L // Задержка между частями
+    // AudioTrack для воспроизведения PCM
+    private var audioTrack: AudioTrack? = null
+
+    // Очередь сообщений
+    private val speechQueue = mutableListOf<Pair<String, Long?>>()
+    private var isProcessingQueue = false
+
+    // ✅ КЭШ ДЛЯ АУДИО
+    private val audioCacheDir = File(context.cacheDir, "tts_cache").apply {
+        if (!exists()) mkdirs()
+    }
+
+    // Максимальный размер кэша: 50 МБ
+    private val maxCacheSize = 50 * 1024 * 1024L
+    private val cacheStatsMap = mutableMapOf<String, Long>()
+
+    companion object {
+        const val MAX_TEXT_LENGTH = 4000
+        const val CHUNK_DELAY_MS = 500L
     }
 
     init {
         loadSettings()
         validateCurrentVoice()
+        cleanCacheIfNeeded()
+        updateCacheStats()
         println("🎤 VoiceOutput: Инициализирован, голос: ${_selectedVoice.value}")
+        println("📁 TTS Cache: ${audioCacheDir.absolutePath}")
     }
 
     /**
-     * ✅ ПРОВЕРКА И ИСПРАВЛЕНИЕ ГОЛОСА
+     * ✅ ПОЛУЧИТЬ ХЕШ ТЕКСТА ДЛЯ КЭША
      */
-    private fun validateCurrentVoice() {
-        val currentVoice = _selectedVoice.value
-        if (isValidVoiceFormat(currentVoice)) return
+    private fun getTextHash(text: String, voice: String, speed: Double): String {
+        val input = "$text|$voice|$speed|${_selectedEmotion.value ?: "neutral"}"
+        val bytes = MessageDigest.getInstance("MD5").digest(input.toByteArray())
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
 
-        val correctedVoice = when {
-            currentVoice.contains("16000") -> currentVoice.replace("16000", "8000")
-            currentVoice == "May" -> SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
-            currentVoice == "Ost" -> SaluteSpeechConfig.DEFAULT_VOICE_MALE
-            currentVoice == "Bys" -> "Bys_8000"
-            currentVoice == "Nez" -> "Nez_8000"
-            currentVoice == "Tur" -> "Tur_8000"
-            currentVoice == "Nec" -> "Nec_8000"
-            currentVoice == "Pon" -> SaluteSpeechConfig.DEFAULT_VOICE_CHILD
-            currentVoice == "Kin" -> "Kin_8000"
-            currentVoice == "Kma" -> "Kma_8000"
-            currentVoice == "Rma" -> "Rma_8000"
-            currentVoice == "Nur" -> "Nur_8000"
-            currentVoice == "Rnu" -> "Rnu_8000"
-            else -> SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
+    /**
+     * ✅ ПОЛУЧИТЬ КЭШИРОВАННЫЙ ФАЙЛ
+     */
+    private fun getCachedAudioFile(hash: String): File {
+        return File(audioCacheDir, "$hash.pcm")
+    }
+
+    /**
+     * ✅ СОХРАНИТЬ АУДИО В КЭШ
+     */
+    private fun cacheAudioData(hash: String, audioData: ByteArray) {
+        try {
+            val cacheFile = getCachedAudioFile(hash)
+            cacheFile.writeBytes(audioData)
+            cacheStatsMap[hash] = System.currentTimeMillis()
+            updateCacheStats()
+            println("💾 TTS Cache: Сохранено ${audioData.size} байт, хеш=$hash")
+        } catch (e: Exception) {
+            println("❌ TTS Cache: Ошибка сохранения: ${e.message}")
         }
-
-        println("⚠️ VoiceOutput: Исправляем некорректный голос: $currentVoice -> $correctedVoice")
-        _selectedVoice.value = correctedVoice
-        saveSettings()
     }
 
-    private fun isValidVoiceFormat(voice: String): Boolean {
-        return _availableVoices.value.any { it.id == voice }
+    /**
+     * ✅ ЗАГРУЗИТЬ АУДИО ИЗ КЭША
+     */
+    private fun loadCachedAudio(hash: String): ByteArray? {
+        return try {
+            val cacheFile = getCachedAudioFile(hash)
+            if (cacheFile.exists()) {
+                val data = cacheFile.readBytes()
+                cacheStatsMap[hash] = System.currentTimeMillis()
+                println("✅ TTS Cache: Загружено ${data.size} байт, хеш=$hash")
+                data
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            println("❌ TTS Cache: Ошибка загрузки: ${e.message}")
+            null
+        }
     }
 
+    /**
+     * ✅ ОЧИСТИТЬ УСТАРЕВШИЙ КЭШ
+     */
+    private fun cleanCacheIfNeeded() {
+        try {
+            val files = audioCacheDir.listFiles() ?: return
+            var totalSize = files.sumOf { it.length() }
+
+            if (totalSize <= maxCacheSize) return
+
+            // Сортируем по дате последнего доступа
+            val sortedFiles = files.sortedBy { it.lastModified() }
+
+            for (file in sortedFiles) {
+                if (totalSize <= maxCacheSize) break
+                val size = file.length()
+                if (file.delete()) {
+                    totalSize -= size
+                    println("🗑️ TTS Cache: Удален ${file.name}, освобождено ${size} байт")
+                }
+            }
+
+            updateCacheStats()
+        } catch (e: Exception) {
+            println("❌ TTS Cache: Ошибка очистки: ${e.message}")
+        }
+    }
+
+    /**
+     * ✅ ОБНОВИТЬ СТАТИСТИКУ КЭША
+     */
+    private fun updateCacheStats() {
+        try {
+            val files = audioCacheDir.listFiles() ?: return
+            val count = files.size
+            val size = files.sumOf { it.length() }
+            val sizeMB = size / (1024.0 * 1024.0)
+            val maxMB = maxCacheSize / (1024.0 * 1024.0)
+
+            _cacheStats.value = "📦 Кэш TTS: $count файлов, ${"%.1f".format(sizeMB)}/${"%.1f".format(maxMB)} МБ"
+        } catch (e: Exception) {
+            _cacheStats.value = "📦 Кэш TTS: ошибка"
+        }
+    }
+
+    /**
+     * ✅ ОЧИСТИТЬ КЭШ
+     */
+    fun clearCache() {
+        viewModelScope.launch {
+            try {
+                val files = audioCacheDir.listFiles() ?: return@launch
+                var deleted = 0
+                var freed = 0L
+
+                files.forEach { file ->
+                    val size = file.length()
+                    if (file.delete()) {
+                        deleted++
+                        freed += size
+                    }
+                }
+
+                cacheStatsMap.clear()
+                updateCacheStats()
+                println("🧹 TTS Cache: Удалено $deleted файлов, освобождено ${freed} байт")
+
+            } catch (e: Exception) {
+                println("❌ TTS Cache: Ошибка очистки: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * ✅ ОЗВУЧИТЬ ДЛИННЫЙ ТЕКСТ (С ОБРЕЗКОЙ ДО 4000)
+     */
+    private suspend fun speakLongText(text: String, messageId: Long? = null) {
+        val chunks = text.chunked(MAX_TEXT_LENGTH)
+        println("🔊 VoiceOutput: Разбиваем текст на ${chunks.size} частей")
+
+        for ((index, chunk) in chunks.withIndex()) {
+            if (!_isVoiceEnabled.value) break
+
+            val isLastChunk = index == chunks.size - 1
+
+            // ✅ Обрезаем каждую часть до 4000 символов
+            val chunkText = if (chunk.length > MAX_TEXT_LENGTH) {
+                val trimmed = chunk.take(MAX_TEXT_LENGTH - 3) + "..."
+                println("   ⚠️ Часть ${index + 1} обрезана с ${chunk.length} до ${trimmed.length}")
+                trimmed
+            } else {
+                chunk
+            }
+
+            println("   Часть ${index + 1}/${chunks.size}: ${chunkText.length} символов")
+
+            speakTextInternal(
+                text = chunkText,
+                messageId = if (index == 0) messageId else null
+            )
+
+            while (_isSpeaking.value) {
+                delay(100)
+            }
+
+            if (!isLastChunk) {
+                delay(CHUNK_DELAY_MS)
+            }
+        }
+    }
+
+    /**
+     * ✅ ВНУТРЕННИЙ МЕТОД ОЗВУЧКИ (С КЭШЕМ)
+     */
+    private suspend fun speakTextInternal(text: String, messageId: Long? = null) {
+        try {
+            stopCurrentPlayback()
+            validateCurrentVoice()
+
+            if (!isValidVoiceFormat(_selectedVoice.value)) {
+                _selectedVoice.value = SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
+                saveSettings()
+            }
+
+            if (messageId != null) {
+                _currentMessageId.value = messageId
+            }
+
+            _isSpeaking.value = true
+            _currentSpeechText.value = text
+            _error.value = null
+
+            val voiceInfo = getCurrentVoiceInfo()
+            println("🔊 VoiceOutput: Озвучка (${text.length}/$MAX_TEXT_LENGTH символов)")
+            println("   Голос: ${voiceInfo?.name ?: _selectedVoice.value} (${_selectedVoice.value})")
+            println("   Скорость: ${_voiceSpeed.value}x")
+
+            // ✅ Генерируем хеш и проверяем кэш
+            val hash = getTextHash(text, _selectedVoice.value, _voiceSpeed.value)
+            var audioData = loadCachedAudio(hash)
+
+            if (audioData == null) {
+                println("   ⏳ Кэш: промах, запрос к API...")
+
+                val result = withContext(Dispatchers.IO) {
+                    saluteSpeechService.synthesizeSpeech(
+                        text = text,
+                        voice = _selectedVoice.value,
+                        speed = _voiceSpeed.value,
+                        emotion = _selectedEmotion.value,
+                        format = SaluteSpeechConfig.DEFAULT_TTS_FORMAT
+                    )
+                }
+
+                if (result.isSuccess) {
+                    audioData = result.getOrNull()
+                    if (audioData != null && audioData.isNotEmpty()) {
+                        // Сохраняем в кэш
+                        cacheAudioData(hash, audioData)
+                        cleanCacheIfNeeded()
+                    }
+                } else {
+                    val error = result.exceptionOrNull()
+                    _error.value = "Ошибка синтеза: ${error?.message}"
+                    println("❌ VoiceOutput: Ошибка синтеза: ${error?.message}")
+                    _isSpeaking.value = false
+                    _currentMessageId.value = null
+                    return
+                }
+            } else {
+                println("   ✅ Кэш: попадание!")
+            }
+
+            if (audioData != null && audioData.isNotEmpty()) {
+                playAudioData(audioData)
+            } else {
+                _error.value = "Получены пустые аудиоданные"
+                _isSpeaking.value = false
+                _currentMessageId.value = null
+            }
+
+        } catch (e: Exception) {
+            _error.value = "Исключение: ${e.message}"
+            println("❌ VoiceOutput: Исключение: ${e.message}")
+            e.printStackTrace()
+            _isSpeaking.value = false
+            _currentMessageId.value = null
+        }
+    }
+
+    /**
+     * ✅ ВОСПРОИЗВЕДЕНИЕ АУДИО
+     */
+    private suspend fun playAudioData(audioData: ByteArray) = withContext(Dispatchers.IO) {
+        try {
+            val sampleRate = if (_selectedVoice.value.contains("24000")) 24000 else 16000
+
+            println("🔊 VoiceOutput: Воспроизведение аудио (${audioData.size} байт, ${sampleRate}Hz)")
+
+            val minBufferSize = AudioTrack.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+
+            val bufferSize = maxOf(minBufferSize, audioData.size)
+
+            audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+
+            audioTrack?.write(audioData, 0, audioData.size)
+            audioTrack?.play()
+
+            launchAnimation()
+
+            while (audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                delay(10)
+            }
+
+            audioTrack?.stop()
+            audioTrack?.release()
+            audioTrack = null
+
+            _isSpeaking.value = false
+            _currentMessageId.value = null
+            _speakingProgress.value = 0f
+
+            println("✅ VoiceOutput: Воспроизведение завершено")
+
+        } catch (e: Exception) {
+            println("❌ VoiceOutput: Ошибка воспроизведения: ${e.message}")
+            e.printStackTrace()
+            _isSpeaking.value = false
+            _currentMessageId.value = null
+            audioTrack = null
+        }
+    }
+
+    /**
+     * ✅ АНИМАЦИЯ ПРОГРЕССА
+     */
+    private suspend fun launchAnimation() {
+        var progress = 0f
+        while (progress < 1f && _isSpeaking.value && audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+            progress += 0.01f
+            _speakingProgress.value = progress.coerceIn(0f, 1f)
+            delay(50)
+        }
+    }
+
+    /**
+     * ✅ ЗАГРУЗИТЬ НАСТРОЙКИ
+     */
     private fun loadSettings() {
         try {
             val prefs = context.getSharedPreferences("voice_settings", Context.MODE_PRIVATE)
@@ -125,6 +432,9 @@ class VoiceOutputViewModel @Inject constructor(
         }
     }
 
+    /**
+     * ✅ СОХРАНИТЬ НАСТРОЙКИ
+     */
     private fun saveSettings() {
         try {
             val prefs = context.getSharedPreferences("voice_settings", Context.MODE_PRIVATE)
@@ -142,12 +452,100 @@ class VoiceOutputViewModel @Inject constructor(
     }
 
     /**
-     * ✅ Озвучить текст с проверкой лимита 4000 символов
-     * @param text Текст для озвучки
-     * @param messageId ID сообщения (для предотвращения дублей)
-     * @param isChunk Флаг, указывающий что это часть разбитого текста (предотвращает рекурсию)
+     * ✅ ПРОВЕРКА И ИСПРАВЛЕНИЕ ГОЛОСА
      */
-    fun speakText(text: String, messageId: Long? = null, isChunk: Boolean = false) {
+    private fun validateCurrentVoice() {
+        val currentVoice = _selectedVoice.value
+        if (isValidVoiceFormat(currentVoice)) return
+
+        val correctedVoice = when {
+            currentVoice.contains("16000") -> currentVoice.replace("16000", "24000")
+            currentVoice == "May" -> SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
+            currentVoice == "Ost" -> "Ost_24000"
+            currentVoice == "Bys" -> "Bys_24000"
+            currentVoice == "Nez" -> "Nez_24000"
+            currentVoice == "Tur" -> "Tur_24000"
+            currentVoice == "Nec" -> "Nec_24000"
+            currentVoice == "Pon" -> SaluteSpeechConfig.DEFAULT_VOICE_CHILD
+            currentVoice == "Kin" -> "Kin_24000"
+            else -> SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
+        }
+
+        println("⚠️ VoiceOutput: Исправляем некорректный голос: $currentVoice -> $correctedVoice")
+        _selectedVoice.value = correctedVoice
+        saveSettings()
+    }
+
+    private fun isValidVoiceFormat(voice: String): Boolean {
+        return _availableVoices.value.any { it.id == voice }
+    }
+
+    /**
+     * ✅ ПОЛНОСТЬЮ ОСТАНОВИТЬ ОЗВУЧКУ
+     */
+    fun stopSpeaking() {
+        viewModelScope.launch {
+            try {
+                audioTrack?.apply {
+                    if (playState == AudioTrack.PLAYSTATE_PLAYING) {
+                        stop()
+                    }
+                    release()
+                }
+                audioTrack = null
+
+                speechQueue.clear()
+                isProcessingQueue = false
+
+                _isSpeaking.value = false
+                _speakingProgress.value = 0f
+                _currentSpeechText.value = ""
+                _currentMessageId.value = null
+
+                println("🔇 VoiceOutput: Озвучка остановлена, очередь очищена")
+            } catch (e: Exception) {
+                println("❌ VoiceOutput: Ошибка остановки: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * ✅ ОСТАНОВИТЬ ТЕКУЩЕЕ ВОСПРОИЗВЕДЕНИЕ
+     */
+    fun stopCurrentPlayback() {
+        try {
+            audioTrack?.apply {
+                if (playState == AudioTrack.PLAYSTATE_PLAYING) {
+                    stop()
+                }
+                release()
+            }
+            audioTrack = null
+            _isSpeaking.value = false
+            println("🔇 VoiceOutput: Текущее воспроизведение остановлено")
+        } catch (e: Exception) {
+            println("❌ VoiceOutput: Ошибка остановки воспроизведения: ${e.message}")
+        }
+    }
+
+    /**
+     * ✅ ПЕРЕКЛЮЧИТЬ ОЗВУЧКУ
+     */
+    fun toggleVoiceEnabled() {
+        _isVoiceEnabled.value = !_isVoiceEnabled.value
+        saveSettings()
+
+        if (!_isVoiceEnabled.value) {
+            stopSpeaking()
+        }
+
+        println("🔊 VoiceOutput: Озвучка ${if (_isVoiceEnabled.value) "включена" else "выключена"}")
+    }
+
+    /**
+     * ✅ ОЗВУЧИТЬ ТЕКСТ
+     */
+    fun speakText(text: String, messageId: Long? = null) {
         if (!_isVoiceEnabled.value) {
             println("🔇 VoiceOutput: Озвучка отключена")
             return
@@ -158,206 +556,51 @@ class VoiceOutputViewModel @Inject constructor(
             return
         }
 
-        // ✅ Защита от дублей сообщений
-        if (messageId != null && _currentMessageId.value == messageId && !isChunk) {
-            println("⏭️ VoiceOutput: Сообщение уже озвучивается, пропускаем")
-            return
-        }
-
-        // ✅ Проверяем длину текста ТОЛЬКО если это не чанк
-        if (!isChunk && text.length > MAX_TEXT_LENGTH) {
-            println("⚠️ VoiceOutput: Текст превышает $MAX_TEXT_LENGTH символов (${text.length}), разбиваем на части")
-            speakLongText(text, messageId)
-            return
-        }
-
         viewModelScope.launch {
-            try {
-                // Останавливаем предыдущую озвучку (но не для чанков!)
-                if (!isChunk) {
-                    stopSpeaking()
-                    delay(100)
-                }
-
-                validateCurrentVoice()
-
-                if (!isValidVoiceFormat(_selectedVoice.value)) {
-                    _selectedVoice.value = SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
-                    saveSettings()
-                }
-
-                // ✅ Сохраняем ID текущего сообщения (только для первого чанка)
-                if (messageId != null && _currentMessageId.value == null) {
-                    _currentMessageId.value = messageId
-                }
-
-                _isSpeaking.value = true
-                _currentSpeechText.value = text
-                _error.value = null
-
-                val voiceInfo = getCurrentVoiceInfo()
-                println("🔊 VoiceOutput: ${if (isChunk) "  └─ ЧАСТЬ" else "Начинаем озвучку"} (${text.length}/$MAX_TEXT_LENGTH символов)")
-                println("   Голос: ${voiceInfo?.name ?: _selectedVoice.value} (${_selectedVoice.value})")
-                println("   Скорость: ${_voiceSpeed.value}x")
-                if (isChunk) println("   ⚡ Это часть разбитого текста")
-                if (messageId != null) println("   Message ID: $messageId")
-
-                val result = withContext(Dispatchers.IO) {
-                    saluteSpeechService.synthesizeSpeech(
-                        text = text,
-                        voice = _selectedVoice.value,
-                        speed = _voiceSpeed.value,
-                        emotion = _selectedEmotion.value,
-                        format = SaluteSpeechConfig.DEFAULT_TTS_FORMAT
-                    )
-                }
-
-                if (result.isSuccess) {
-                    val audioData = result.getOrNull()
-                    if (audioData != null && audioData.isNotEmpty()) {
-                        currentAudioData = audioData
-                        _audioDuration.value = if (_selectedVoice.value.contains("24000")) {
-                            audioData.size / 48
-                        } else {
-                            audioData.size / 32
-                        }
-
-                        val playResult = saluteSpeechService.playAudio(audioData)
-
-                        if (playResult.isSuccess) {
-                            println("✅ VoiceOutput: ${if (isChunk) "  └─ ЧАСТЬ завершена" else "Озвучка успешно завершена"}")
-                            if (!isChunk) {
-                                animateProgress(_audioDuration.value)
-                            }
-                        } else {
-                            val error = playResult.exceptionOrNull()
-                            _error.value = "Ошибка воспроизведения: ${error?.message}"
-                            println("❌ VoiceOutput: Ошибка воспроизведения: ${error?.message}")
-                        }
-                    } else {
-                        _error.value = "Получены пустые аудиоданные"
-                        println("❌ VoiceOutput: Пустые аудиоданные")
-                    }
-                } else {
-                    val error = result.exceptionOrNull()
-                    _error.value = "Ошибка синтеза речи: ${error?.message}"
-                    println("❌ VoiceOutput: Ошибка синтеза: ${error?.message}")
-
-                    if (error?.message?.contains("invalid voice") == true) {
-                        println("🔄 VoiceOutput: Сбрасываем голос на дефолтный из-за ошибки")
-                        _selectedVoice.value = SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
-                        saveSettings()
-                    }
-                }
-
-            } catch (e: Exception) {
-                _error.value = "Исключение: ${e.message}"
-                println("❌ VoiceOutput: Исключение: ${e.message}")
-                e.printStackTrace()
-            } finally {
-                _isSpeaking.value = false
-                _currentSpeechText.value = ""
-                _speakingProgress.value = 0f
-                _audioDuration.value = 0
-
-                // ✅ Сбрасываем ID только после последнего чанка
-                if (!isChunk && messageId != null && _currentMessageId.value == messageId) {
-                    _currentMessageId.value = null
-                }
-            }
+            speechQueue.add(text to messageId)
+            processQueue()
         }
     }
 
     /**
-     * ✅ Озвучить длинный текст с разбиением на части по 4000 символов
-     * БЕЗ РЕКУРСИИ!
+     * ✅ ОБРАБОТКА ОЧЕРЕДИ
      */
-    private fun speakLongText(text: String, messageId: Long? = null) {
-        viewModelScope.launch {
-            try {
-                // Сохраняем ID для первого чанка
-                if (messageId != null) {
-                    _currentMessageId.value = messageId
+    private suspend fun processQueue() {
+        if (isProcessingQueue) return
+        if (speechQueue.isEmpty()) return
+
+        isProcessingQueue = true
+
+        try {
+            while (speechQueue.isNotEmpty()) {
+                val (text, messageId) = speechQueue.removeAt(0)
+
+                if (!_isVoiceEnabled.value) {
+                    speechQueue.clear()
+                    break
                 }
 
-                val chunks = text.chunked(MAX_TEXT_LENGTH)
-                println("🔊 VoiceOutput: Разбиваем текст на ${chunks.size} частей")
-
-                for ((index, chunk) in chunks.withIndex()) {
-                    val isLastChunk = index == chunks.size - 1
-
-                    // ✅ Добавляем индикатор продолжения для всех частей, кроме последней
-                    val chunkText = if (!isLastChunk) {
-                        chunk + "\n\n[Продолжение следует...]"
-                    } else {
-                        chunk
-                    }
-
-                    println("   Часть ${index + 1}/${chunks.size}: ${chunkText.length} символов")
-
-                    // ✅ ВАЖНО: Вызываем speakText с флагом isChunk = true
-                    speakText(
-                        text = chunkText,
-                        messageId = if (index == 0) messageId else null,
-                        isChunk = true
-                    )
-
-                    // Ждем окончания текущей части
-                    while (_isSpeaking.value) {
-                        delay(100)
-                    }
-
-                    // Пауза между частями
-                    if (!isLastChunk) {
-                        println("   ⏸️ Пауза между частями...")
-                        delay(CHUNK_DELAY_MS)
-                    }
+                if (text.length > MAX_TEXT_LENGTH) {
+                    println("⚠️ VoiceOutput: Текст превышает $MAX_TEXT_LENGTH символов (${text.length}), разбиваем на части")
+                    speakLongText(text, messageId)
+                } else {
+                    speakTextInternal(text, messageId)
                 }
 
-                println("✅ VoiceOutput: Все ${chunks.size} частей озвучены")
-
-                // Сбрасываем ID сообщения после завершения всех частей
-                if (messageId != null) {
-                    _currentMessageId.value = null
+                while (_isSpeaking.value) {
+                    delay(100)
                 }
 
-            } catch (e: Exception) {
-                _error.value = "Ошибка при разбиении текста: ${e.message}"
-                println("❌ VoiceOutput: Ошибка разбиения текста: ${e.message}")
-                e.printStackTrace()
+                delay(200)
             }
+        } finally {
+            isProcessingQueue = false
         }
     }
 
-    fun stopSpeaking() {
-        viewModelScope.launch {
-            try {
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                audioManager.abandonAudioFocus(null)
-                isPlaying = false
-                _isSpeaking.value = false
-                _speakingProgress.value = 0f
-                _currentSpeechText.value = ""
-                _currentMessageId.value = null // Сбрасываем ID при принудительной остановке
-                println("🔇 VoiceOutput: Озвучка остановлена")
-            } catch (e: Exception) {
-                println("❌ VoiceOutput: Ошибка остановки: ${e.message}")
-            }
-        }
-    }
-
-    private suspend fun animateProgress(duration: Int) {
-        val step = 50L
-        val totalSteps = if (duration > 0) (duration / step).coerceIn(20, 200) else 100
-
-        var progress = 0f
-        while (progress < 1f && _isSpeaking.value) {
-            progress += 1f / totalSteps
-            _speakingProgress.value = progress.coerceIn(0f, 1f)
-            delay(step)
-        }
-    }
-
+    /**
+     * ✅ УСТАНОВИТЬ ГОЛОС
+     */
     fun setVoice(voiceId: String) {
         if (isValidVoiceFormat(voiceId)) {
             _selectedVoice.value = voiceId
@@ -369,44 +612,26 @@ class VoiceOutputViewModel @Inject constructor(
         }
     }
 
+    /**
+     * ✅ УСТАНОВИТЬ СКОРОСТЬ
+     */
     fun setVoiceSpeed(speed: Double) {
         _voiceSpeed.value = speed.coerceIn(0.5, 2.0)
         saveSettings()
         println("⚡ VoiceOutput: Скорость речи: ${_voiceSpeed.value}x")
     }
 
+    /**
+     * ✅ УСТАНОВИТЬ ЭМОЦИЮ
+     */
     fun setEmotion(emotion: String?) {
         _selectedEmotion.value = emotion
         saveSettings()
         println("😊 VoiceOutput: Эмоция: ${emotion ?: "нейтральная"}")
     }
 
-    fun toggleVoiceEnabled() {
-        _isVoiceEnabled.value = !_isVoiceEnabled.value
-        saveSettings()
-        if (!_isVoiceEnabled.value) stopSpeaking()
-        println("🔊 VoiceOutput: Озвучка ${if (_isVoiceEnabled.value) "включена" else "выключена"}")
-    }
-
     fun getCurrentVoiceInfo(): SaluteSpeechConfig.Voice? {
         return _availableVoices.value.find { it.id == _selectedVoice.value }
-    }
-
-    fun getVoiceDisplayName(voiceId: String): String {
-        return _availableVoices.value.find { it.id == voiceId }?.name ?: "Неизвестный голос"
-    }
-
-    fun getVoicesByGender(gender: String): List<SaluteSpeechConfig.Voice> {
-        return _availableVoices.value.filter { it.gender == gender }
-    }
-
-    fun getVoicesByQuality(quality: String): List<SaluteSpeechConfig.Voice> {
-        return _availableVoices.value.filter { it.quality == quality }
-    }
-
-    fun isEmotionSupported(emotionId: String): Boolean {
-        return _selectedVoice.value.contains("8000") &&
-                _availableEmotions.value.any { it.id == emotionId }
     }
 
     fun clearError() {
@@ -419,14 +644,14 @@ class VoiceOutputViewModel @Inject constructor(
         _voiceSpeed.value = 1.0
         _selectedEmotion.value = null
         saveSettings()
-        println("🔄 VoiceOutput: Сброс настроек на значения по умолчанию")
+        println("🔄 VoiceOutput: Сброс настроек")
     }
 
     fun forceClearSettings() {
         val prefs = context.getSharedPreferences("voice_settings", Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
         resetToDefaults()
-        println("🧹 VoiceOutput: Настройки полностью очищены")
+        println("🧹 VoiceOutput: Настройки очищены")
     }
 
     fun testVoice() {
@@ -434,7 +659,6 @@ class VoiceOutputViewModel @Inject constructor(
         val testText = when {
             voiceInfo?.gender == "Мужской" -> "Привет! Я ${voiceInfo.name}. Мой голос звучит так."
             voiceInfo?.gender == "Женский" -> "Привет! Я ${voiceInfo.name}. Мой голос звучит так."
-            voiceInfo?.name == "Пон" -> "Привет! Я Пон. Мой детский голос звучит так."
             else -> "Привет! Я голосовой помощник. Этот голос звучит так."
         }
         speakText(testText)
@@ -447,18 +671,17 @@ class VoiceOutputViewModel @Inject constructor(
             ├─ Голос: ${voiceInfo?.name ?: _selectedVoice.value}
             ├─ ID: ${_selectedVoice.value}
             ├─ Пол: ${voiceInfo?.gender ?: "Неизвестно"}
-            ├─ Качество: ${voiceInfo?.quality ?: "Неизвестно"}
+            ├─ Качество: 24kHz
             ├─ Скорость: ${_voiceSpeed.value}x
             ├─ Эмоция: ${_selectedEmotion.value ?: "нейтральная"}
-            ├─ Формат TTS: ${SaluteSpeechConfig.DEFAULT_TTS_FORMAT}
-            ├─ Лимит символов: $MAX_TEXT_LENGTH
-            └─ Озвучка: ${if (_isVoiceEnabled.value) "включена" else "выключена"}
+            ├─ Озвучка: ${if (_isVoiceEnabled.value) "включена" else "выключена"}
+            └─ ${_cacheStats.value}
         """.trimIndent()
     }
 
     override fun onCleared() {
         super.onCleared()
         stopSpeaking()
-        currentAudioData = null
+        println("🔄 VoiceOutputViewModel очищен")
     }
 }

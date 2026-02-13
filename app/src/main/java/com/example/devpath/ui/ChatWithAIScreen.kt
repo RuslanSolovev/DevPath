@@ -43,6 +43,7 @@ import com.example.devpath.ui.viewmodel.ChatHistoryViewModel
 import com.example.devpath.ui.viewmodel.VoiceInputViewModel
 import com.example.devpath.ui.viewmodel.VoiceOutputViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Date
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -67,6 +68,9 @@ fun ChatWithAIScreen(
     var showEmotionPicker by remember { mutableStateOf(false) }
     var showHistorySheet by remember { mutableStateOf(false) }
 
+    // ✅ Флаг загрузки истории (чтобы не озвучивать при открытии)
+    var isHistoryLoading by remember { mutableStateOf(false) }
+
     val isVoiceEnabled by voiceOutputViewModel.isVoiceEnabled.collectAsState()
     val selectedVoice by voiceOutputViewModel.selectedVoice.collectAsState()
     val isSpeaking by voiceOutputViewModel.isSpeaking.collectAsState()
@@ -75,6 +79,7 @@ fun ChatWithAIScreen(
     val voiceSpeed by voiceOutputViewModel.voiceSpeed.collectAsState()
 
     val chatHistoryViewModel: ChatHistoryViewModel = hiltViewModel()
+    val coroutineScope = rememberCoroutineScope()
 
     // Snackbar для уведомлений
     val snackbarHostState = remember { SnackbarHostState() }
@@ -83,19 +88,18 @@ fun ChatWithAIScreen(
     val successMessage by viewModel.success.collectAsState()
     val errorMessage by viewModel.error.collectAsState()
 
-// Показываем сообщение об успехе
+    // Показываем сообщение об успехе
     LaunchedEffect(successMessage) {
         successMessage?.let {
             snackbarHostState.showSnackbar(
                 message = it,
                 duration = SnackbarDuration.Short
             )
-            // Очищаем сообщение после показа
             viewModel.clearSuccess()
         }
     }
 
-// Показываем сообщение об ошибке
+    // Показываем сообщение об ошибке
     LaunchedEffect(errorMessage) {
         errorMessage?.let {
             snackbarHostState.showSnackbar(
@@ -103,7 +107,6 @@ fun ChatWithAIScreen(
                 duration = SnackbarDuration.Short,
                 actionLabel = "OK"
             )
-            // Очищаем ошибку после показа
             viewModel.clearError()
         }
     }
@@ -115,26 +118,22 @@ fun ChatWithAIScreen(
         }
     }
 
-    // Обработка ошибок
-    LaunchedEffect(error) {
-        error?.let {
-            println("❌ Chat error: $it")
-            viewModel.clearError()
-        }
-    }
-
     // Диалог настроек голоса
     if (showVoiceSettings) {
         VoiceSettingsDialog(
             showDialog = showVoiceSettings,
             currentVoice = selectedVoice,
             currentSpeed = voiceSpeed,
+            isVoiceEnabled = isVoiceEnabled,
             onDismiss = { showVoiceSettings = false },
             onVoiceSelected = { voiceId ->
                 voiceOutputViewModel.setVoice(voiceId)
             },
             onSpeedSelected = { speed ->
                 voiceOutputViewModel.setVoiceSpeed(speed)
+            },
+            onToggleVoiceEnabled = {
+                voiceOutputViewModel.toggleVoiceEnabled()
             }
         )
     }
@@ -150,16 +149,15 @@ fun ChatWithAIScreen(
         )
     }
 
-    // ✅ КОРНЕВОЙ КОНТЕНТ - БЕЗ ВСЯКИХ ОТСТУПОВ!
+    // КОРНЕВОЙ КОНТЕНТ - БЕЗ ОТСТУПОВ
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background),
-            // 👆 НИКАКИХ windowInsetsPadding! НИ сверху, НИ снизу!
             verticalArrangement = Arrangement.Top
         ) {
-            // ✅ 1. ВЕРХНЯЯ ПАНЕЛЬ - ПРИЖАТА К ВЕРХУ!
+
             ChatTopAppBar(
                 onBackClick = onBackToHome,
                 onClearChat = { viewModel.clearChat() },
@@ -169,13 +167,15 @@ fun ChatWithAIScreen(
                     showHistorySheet = true
                 },
                 onVoiceSettingsClick = { showVoiceSettings = true },
+                onStopSpeakingClick = { voiceOutputViewModel.stopSpeaking() },
+                onClearCacheClick = { voiceOutputViewModel.clearCache() },
                 isVoiceEnabled = isVoiceEnabled,
                 isSpeaking = isSpeaking,
                 isChatEmpty = messages.isEmpty(),
                 isLoading = isLoading
             )
 
-            // ✅ 2. КОНТЕНТ - занимает всё место
+            // КОНТЕНТ
             if (messages.isEmpty()) {
                 EmptyChatContent(
                     modifier = Modifier
@@ -207,13 +207,14 @@ fun ChatWithAIScreen(
                         AnimatedMessageItem(
                             message = message,
                             isVoiceEnabled = isVoiceEnabled,
-                            voiceOutputViewModel = voiceOutputViewModel
+                            voiceOutputViewModel = voiceOutputViewModel,
+                            isHistoryLoading = isHistoryLoading
                         )
                     }
                 }
             }
 
-            // ✅ 3. ПАНЕЛЬ ВВОДА - ВПЛОТНУЮ К НИЗУ!
+            // ПАНЕЛЬ ВВОДА
             InputPanel(
                 modifier = Modifier.fillMaxWidth(),
                 message = message,
@@ -245,7 +246,7 @@ fun ChatWithAIScreen(
             )
         }
 
-        // ✅ SNAKBAR - поверх всего, с учетом клавиатуры
+        // SNAKBAR
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
@@ -255,22 +256,38 @@ fun ChatWithAIScreen(
         )
     }
 
-// ✅ BOTTOM SHEET ИСТОРИИ - без изменений
+    // ✅ BOTTOM SHEET ИСТОРИИ
     ChatHistoryBottomSheet(
         showSheet = showHistorySheet,
         onDismiss = { showHistorySheet = false },
         onSessionSelected = { sessionId ->
+            // ✅ При загрузке истории включаем флаг
+            isHistoryLoading = true
             viewModel.loadChatSession(sessionId)
             showHistorySheet = false
+
+            // ✅ Принудительно сбрасываем isLoading через секунду
+            coroutineScope.launch {
+                delay(1000)
+                viewModel.forceResetLoading()
+            }
         },
         onDeleteSession = { sessionId ->
             chatHistoryViewModel.deleteSession(sessionId)
         },
         chatHistoryViewModel = chatHistoryViewModel
     )
+
+    // ✅ Отдельный эффект для сброса флага загрузки
+    LaunchedEffect(isHistoryLoading) {
+        if (isHistoryLoading) {
+            delay(1000)
+            isHistoryLoading = false
+        }
+    }
 }
 
-// ==================== ВЕРХНЯЯ ПАНЕЛЬ С ВСПЛЫВАЮЩИМ МЕНЮ ====================
+// ==================== ВЕРХНЯЯ ПАНЕЛЬ ====================
 @Composable
 private fun ChatTopAppBar(
     onBackClick: () -> Unit,
@@ -278,6 +295,8 @@ private fun ChatTopAppBar(
     onSaveChat: () -> Unit,
     onHistoryClick: () -> Unit,
     onVoiceSettingsClick: () -> Unit,
+    onStopSpeakingClick: () -> Unit,
+    onClearCacheClick: () -> Unit,
     isVoiceEnabled: Boolean,
     isSpeaking: Boolean,
     isChatEmpty: Boolean,
@@ -300,11 +319,12 @@ private fun ChatTopAppBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Левая часть без изменений
+            // Левая часть - Назад, лого, название
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
+                // Кнопка назад
                 IconButton(
                     onClick = onBackClick,
                     modifier = Modifier
@@ -319,6 +339,7 @@ private fun ChatTopAppBar(
                     )
                 }
 
+                // Логотип
                 Icon(
                     Icons.Default.SmartToy,
                     contentDescription = null,
@@ -328,6 +349,7 @@ private fun ChatTopAppBar(
                         .padding(0.dp)
                 )
 
+                // Название
                 Text(
                     "GigaChat",
                     style = MaterialTheme.typography.titleLarge.copy(
@@ -338,16 +360,19 @@ private fun ChatTopAppBar(
                 )
             }
 
-            // Правая часть - только индикатор речи и меню
+            // Правая часть - Индикатор речи, История, Меню
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                // Индикатор речи
+                // Индикатор речи / Кнопка стоп
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .padding(0.dp),
+                        .padding(0.dp)
+                        .clickable(enabled = isSpeaking) {
+                            onStopSpeakingClick()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     if (isSpeaking) {
@@ -358,12 +383,33 @@ private fun ChatTopAppBar(
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            SpeakingAnimation()
+                            Icon(
+                                Icons.Default.Stop,
+                                contentDescription = "Остановить",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
 
-                // Кнопка меню с иконкой
+                // Кнопка истории
+                IconButton(
+                    onClick = onHistoryClick,
+                    enabled = !isLoading,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .padding(0.dp)
+                ) {
+                    Icon(
+                        Icons.Outlined.History,
+                        contentDescription = "История диалогов",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                // Кнопка меню
                 IconButton(
                     onClick = { expanded = true },
                     enabled = !isLoading,
@@ -395,7 +441,7 @@ private fun ChatTopAppBar(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
                     modifier = Modifier
-                        .width(200.dp)
+                        .width(240.dp)
                         .background(
                             MaterialTheme.colorScheme.surface,
                             shape = RoundedCornerShape(16.dp)
@@ -438,30 +484,7 @@ private fun ChatTopAppBar(
                         Divider(modifier = Modifier.padding(horizontal = 8.dp))
                     }
 
-                    // История диалогов
-                    DropdownMenuItem(
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    Icons.Outlined.History,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Text("История диалогов")
-                            }
-                        },
-                        onClick = {
-                            expanded = false
-                            onHistoryClick()
-                        },
-                        modifier = Modifier.height(48.dp)
-                    )
-
-                    // Сохранить диалог (только если есть сообщения)
+                    // Сохранить диалог
                     if (!isChatEmpty) {
                         DropdownMenuItem(
                             text = {
@@ -485,6 +508,31 @@ private fun ChatTopAppBar(
                             modifier = Modifier.height(48.dp)
                         )
                     }
+
+                    // Очистить кэш TTS
+                    Divider(modifier = Modifier.padding(horizontal = 8.dp))
+
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Clear,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text("Очистить кэш озвучки")
+                            }
+                        },
+                        onClick = {
+                            expanded = false
+                            onClearCacheClick()
+                        },
+                        modifier = Modifier.height(48.dp)
+                    )
 
                     // Очистить чат (только если есть сообщения)
                     if (!isChatEmpty) {
@@ -521,6 +569,7 @@ private fun ChatTopAppBar(
     }
 }
 
+// ==================== BOTTOM SHEET ИСТОРИИ ====================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatHistoryBottomSheet(
@@ -621,7 +670,7 @@ fun ChatHistoryBottomSheet(
                 }
 
                 // Контент
-                key(sessions.size) { // Принудительная перерисовка при изменении списка
+                key(sessions.size) {
                     if (isLoading) {
                         Box(
                             modifier = Modifier
@@ -674,7 +723,7 @@ fun ChatHistoryBottomSheet(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    "Нажмите 💾 чтобы сохранить текущий диалог",
+                                    "Нажмите ⋮ → Сохранить диалог",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                 )
@@ -689,6 +738,7 @@ fun ChatHistoryBottomSheet(
     }
 }
 
+// ==================== КАРТОЧКА СЕССИИ ====================
 @Composable
 fun SessionCard(
     session: ChatSession,
@@ -715,7 +765,7 @@ fun SessionCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                // Заголовок с иконкой чата
+                // Заголовок с иконкой
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -832,7 +882,7 @@ fun SessionCard(
     }
 }
 
-// Вспомогательные функции
+// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 private fun formatDate(timestamp: Long): String {
     val date = Date(timestamp)
     val now = Date()
@@ -1088,23 +1138,32 @@ private fun LoadingIndicator() {
     }
 }
 
-// ==================== СООБЩЕНИЕ ====================
+// ✅ ИСПРАВЛЕННЫЙ AnimatedMessageItem (с флагом isHistoryLoading)
 @Composable
 private fun AnimatedMessageItem(
     message: AIMessage,
     isVoiceEnabled: Boolean,
-    voiceOutputViewModel: VoiceOutputViewModel
+    voiceOutputViewModel: VoiceOutputViewModel,
+    isHistoryLoading: Boolean
 ) {
     var isPlaying by remember { mutableStateOf(false) }
     val isSpeaking by voiceOutputViewModel.isSpeaking.collectAsState()
     val currentMessageId by voiceOutputViewModel.currentMessageId.collectAsState()
 
-    LaunchedEffect(message.text, message.isUser, isVoiceEnabled) {
-        if (!message.isUser && isVoiceEnabled && currentMessageId != message.timestamp) {
-            delay(500)
-            isPlaying = true
-            voiceOutputViewModel.speakText(message.text, message.timestamp)
-            isPlaying = false
+    LaunchedEffect(message.text, message.isUser, isVoiceEnabled, isHistoryLoading) {
+        println("🎤 AnimatedMessageItem: isUser=${message.isUser}, isVoiceEnabled=$isVoiceEnabled, currentMessageId=$currentMessageId, timestamp=${message.timestamp}, isHistoryLoading=$isHistoryLoading")
+
+        // Озвучиваем только если это не загрузка истории
+        if (!message.isUser && isVoiceEnabled && !isHistoryLoading) {
+            if (currentMessageId == message.timestamp) {
+                println("⏭️ Сообщение уже озвучивается, пропускаем")
+            } else {
+                delay(500)
+                isPlaying = true
+                println("🔊 Запускаем озвучку: ${message.text.take(50)}...")
+                voiceOutputViewModel.speakText(message.text, message.timestamp)
+                isPlaying = false
+            }
         }
     }
 
@@ -1121,6 +1180,7 @@ private fun AnimatedMessageItem(
                 message = message,
                 isPlaying = isPlaying || (currentMessageId == message.timestamp && isSpeaking),
                 onPlayClick = {
+                    println("👉 Ручная озвучка: ${message.text.take(50)}...")
                     voiceOutputViewModel.speakText(message.text, message.timestamp)
                 }
             )

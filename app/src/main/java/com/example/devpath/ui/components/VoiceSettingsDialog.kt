@@ -13,15 +13,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.devpath.api.speech.SaluteSpeechConfig
 
 @Composable
 fun VoiceSettingsDialog(
     showDialog: Boolean,
     currentVoice: String,
     currentSpeed: Double,
+    isVoiceEnabled: Boolean,
     onDismiss: () -> Unit,
     onVoiceSelected: (String) -> Unit,
-    onSpeedSelected: (Double) -> Unit
+    onSpeedSelected: (Double) -> Unit,
+    onToggleVoiceEnabled: () -> Unit
 ) {
     if (showDialog) {
         AlertDialog(
@@ -47,7 +50,32 @@ fun VoiceSettingsDialog(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // === ЖЕНСКИЕ ГОЛОСА - ТОЛЬКО 24kHz ===
+                    // ✅ КНОПКА ВКЛ/ВЫКЛ ОЗВУЧКИ
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Озвучка ответов",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Switch(
+                            checked = isVoiceEnabled,
+                            onCheckedChange = { onToggleVoiceEnabled() },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                    // === ЖЕНСКИЕ ГОЛОСА ===
                     Text(
                         text = "👩 Женские голоса (24kHz)",
                         style = MaterialTheme.typography.titleSmall,
@@ -62,13 +90,6 @@ fun VoiceSettingsDialog(
                     )
 
                     VoiceOption(
-                        name = "Нез",
-                        id = "Nez_24000",
-                        isSelected = currentVoice == "Nez_24000",
-                        onClick = { onVoiceSelected("Nez_24000") }
-                    )
-
-                    VoiceOption(
                         name = "Александра",
                         id = "Ost_24000",
                         isSelected = currentVoice == "Ost_24000",
@@ -77,7 +98,7 @@ fun VoiceSettingsDialog(
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                    // === МУЖСКИЕ ГОЛОСА - ТОЛЬКО 24kHz ===
+                    // === МУЖСКИЕ ГОЛОСА ===
                     Text(
                         text = "👨 Мужские голоса (24kHz)",
                         style = MaterialTheme.typography.titleSmall,
@@ -92,33 +113,10 @@ fun VoiceSettingsDialog(
                     )
 
                     VoiceOption(
-                        name = "Тарас",
-                        id = "Tur_24000",
-                        isSelected = currentVoice == "Tur_24000",
-                        onClick = { onVoiceSelected("Tur_24000") }
-                    )
-
-                    VoiceOption(
                         name = "Сергей",
                         id = "Pon_24000",
                         isSelected = currentVoice == "Pon_24000",
                         onClick = { onVoiceSelected("Pon_24000") }
-                    )
-
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-                    // === АНГЛИЙСКИЙ ГОЛОС ===
-                    Text(
-                        text = "🌍 Английский голос (24kHz)",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    VoiceOption(
-                        name = "Kira (English)",
-                        id = "Kin_24000",
-                        isSelected = currentVoice == "Kin_24000",
-                        onClick = { onVoiceSelected("Kin_24000") }
                     )
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -151,7 +149,8 @@ fun VoiceSettingsDialog(
                                 thumbColor = MaterialTheme.colorScheme.primary,
                                 activeTrackColor = MaterialTheme.colorScheme.primary,
                                 inactiveTrackColor = MaterialTheme.colorScheme.primaryContainer
-                            )
+                            ),
+                            enabled = isVoiceEnabled // Блокируем если озвучка выключена
                         )
 
                         Text(
