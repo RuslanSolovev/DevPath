@@ -3,22 +3,24 @@ package com.example.devpath.ui.viewmodel
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.devpath.api.speech.SaluteSpeechService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Job
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -37,6 +39,9 @@ class VoiceInputViewModel @Inject constructor(
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
+    private val _isListening = MutableStateFlow(false)
+    val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
+
     private val _recognizedText = MutableStateFlow("")
     val recognizedText: StateFlow<String> = _recognizedText.asStateFlow()
 
@@ -49,15 +54,34 @@ class VoiceInputViewModel @Inject constructor(
     private val _recordingDuration = MutableStateFlow(0)
     val recordingDuration: StateFlow<Int> = _recordingDuration.asStateFlow()
 
+    private val _isVoiceDetected = MutableStateFlow(false)
+    val isVoiceDetected: StateFlow<Boolean> = _isVoiceDetected.asStateFlow()
+
+    // Состояния для диалога разрешений
+    private val _showPermissionDialog = MutableStateFlow(false)
+    val showPermissionDialog: StateFlow<Boolean> = _showPermissionDialog.asStateFlow()
+
+    private val _permissionPermanentlyDenied = MutableStateFlow(false)
+    val permissionPermanentlyDenied: StateFlow<Boolean> = _permissionPermanentlyDenied.asStateFlow()
+
     private var mediaRecorder: MediaRecorder? = null
     private var audioFile: File? = null
     private var startTime: Long = 0
 
-    // Jobs для корутин вместо Timer
     private var durationJob: Job? = null
     private var audioLevelJob: Job? = null
+    private var silenceDetectorJob: Job? = null
+    private var autoRestartJob: Job? = null
 
-    // Проверка разрешения на запись аудио
+    private var lastVoiceTime = 0L
+    private val silenceThreshold = 1500L
+    private var isSpeaking = false
+    private var currentCallback: ((String) -> Unit)? = null
+
+    init {
+        println("🎤 VoiceInputViewModel инициализирован")
+    }
+
     fun hasRecordAudioPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
@@ -65,71 +89,244 @@ class VoiceInputViewModel @Inject constructor(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    // Начать запись голоса
-    fun startRecording() {
+    fun checkPermissionAndAct(
+        onPermissionGranted: () -> Unit,
+        onShowDialog: () -> Unit
+    ) {
+        if (hasRecordAudioPermission()) {
+            onPermissionGranted.invoke()
+        } else {
+            _showPermissionDialog.value = true
+            onShowDialog.invoke()
+        }
+    }
+
+    fun handlePermissionResult(isGranted: Boolean, shouldShowRationale: Boolean) {
+        if (isGranted) {
+            _showPermissionDialog.value = false
+            _permissionPermanentlyDenied.value = false
+            _error.value = null
+
+            if (_isListening.value) {
+                currentCallback?.let { callback ->
+                    startListening(callback)
+                }
+            } else if (_isRecording.value) {
+                startRecording()
+            }
+        } else {
+            if (!shouldShowRationale) {
+                _permissionPermanentlyDenied.value = true
+                _error.value = "Разрешение на запись аудио заблокировано навсегда"
+            } else {
+                _error.value = "Разрешение на запись аудио отклонено"
+            }
+        }
+    }
+
+    fun dismissPermissionDialog() {
+        _showPermissionDialog.value = false
+    }
+
+    fun openAppSettings() {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            _error.value = "Не удалось открыть настройки"
+        }
+    }
+
+    fun startListening(onResult: (String) -> Unit) {
+        println("🎤 VoiceInput: startListening вызван")
+
         if (!hasRecordAudioPermission()) {
             _error.value = "Нет разрешения на запись аудио"
+            _showPermissionDialog.value = true
+            println("❌ VoiceInput: Нет разрешения")
             return
         }
 
+        stopRecording()
+
+        _isListening.value = true
+        _error.value = null
+        currentCallback = onResult
+        startRecordingWithCallback()
+    }
+
+    fun stopListening() {
+        println("🎤 VoiceInput: stopListening вызван")
+        _isListening.value = false
+        currentCallback = null
+        stopRecording()
+        autoRestartJob?.cancel()
+        autoRestartJob = null
+    }
+
+    private fun startRecordingWithCallback() {
         viewModelScope.launch {
             try {
-                // Создаем файл для записи
+                println("🎤 VoiceInput: Создание аудиофайла...")
                 audioFile = createAudioFile()
 
-                // Инициализируем MediaRecorder с совместимыми параметрами
+                println("🎤 VoiceInput: Инициализация MediaRecorder...")
                 mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     MediaRecorder(context)
                 } else {
                     MediaRecorder()
                 }.apply {
                     setAudioSource(MediaRecorder.AudioSource.MIC)
-
-                    // Используем 3GP формат (поддерживается на всех API уровнях)
-                    setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
-                    setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
-                    setAudioSamplingRate(8000)
+                    // Используем OPUS в OGG контейнере
+                    setOutputFormat(MediaRecorder.OutputFormat.OGG)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.OPUS)
+                    setAudioSamplingRate(16000)
+                    setAudioEncodingBitRate(32000)
                     setOutputFile(audioFile?.absolutePath)
 
-                    prepare()
-                    start()
+                    try {
+                        prepare()
+                        start()
+                        println("🎤 VoiceInput: MediaRecorder успешно запущен")
+                    } catch (e: Exception) {
+                        println("❌ VoiceInput: Ошибка MediaRecorder: ${e.message}")
+                        throw e
+                    }
+                }
+
+                _isRecording.value = true
+                _isVoiceDetected.value = false
+                isSpeaking = false
+                startTime = System.currentTimeMillis()
+                lastVoiceTime = startTime
+
+                startDurationTimer()
+                startAudioLevelMonitor()
+                startSilenceDetector()
+
+                println("🎤 VoiceInput: Запись начата, файл: ${audioFile?.absolutePath}")
+
+            } catch (e: Exception) {
+                _error.value = "Ошибка записи: ${e.message}"
+                println("❌ VoiceInput: Ошибка записи: ${e.message}")
+                e.printStackTrace()
+                stopListening()
+            }
+        }
+    }
+
+    private fun startSilenceDetector() {
+        silenceDetectorJob = viewModelScope.launch {
+            while (_isRecording.value) {
+                delay(100)
+
+                if (_isVoiceDetected.value) {
+                    if (!isSpeaking) {
+                        isSpeaking = true
+                        lastVoiceTime = System.currentTimeMillis()
+                        println("🎤 VoiceInput: Голос обнаружен")
+                    }
+                    lastVoiceTime = System.currentTimeMillis()
+                } else {
+                    if (isSpeaking) {
+                        val silenceDuration = System.currentTimeMillis() - lastVoiceTime
+                        if (silenceDuration > silenceThreshold) {
+                            println("🎤 VoiceInput: Тишина ${silenceDuration}мс, останавливаем")
+                            isSpeaking = false
+                            stopRecordingAndRecognize { text ->
+                                currentCallback?.invoke(text)
+                                if (_isListening.value) {
+                                    autoRestartJob = viewModelScope.launch {
+                                        delay(500)
+                                        startRecordingWithCallback()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun startRecording() {
+        println("🎤 VoiceInput: startRecording вызван")
+
+        if (!hasRecordAudioPermission()) {
+            _error.value = "Нет разрешения на запись аудио"
+            _showPermissionDialog.value = true
+            println("❌ VoiceInput: Нет разрешения")
+            return
+        }
+
+        if (_isListening.value) {
+            stopListening()
+        }
+
+        viewModelScope.launch {
+            try {
+                audioFile = createAudioFile()
+
+                mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    MediaRecorder(context)
+                } else {
+                    MediaRecorder()
+                }.apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.OGG)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.OPUS)
+                    setAudioSamplingRate(16000)
+                    setAudioEncodingBitRate(32000)
+                    setOutputFile(audioFile?.absolutePath)
+
+                    try {
+                        prepare()
+                        start()
+                        println("🎤 VoiceInput: MediaRecorder успешно запущен")
+                    } catch (e: Exception) {
+                        println("❌ VoiceInput: Ошибка MediaRecorder: ${e.message}")
+                        throw e
+                    }
                 }
 
                 _isRecording.value = true
                 _error.value = null
                 startTime = System.currentTimeMillis()
 
-                // Запускаем таймер длительности записи с помощью корутин
                 startDurationTimer()
-
-                // Запускаем мониторинг уровня звука с помощью корутин
                 startAudioLevelMonitor()
 
-                println("🎤 VoiceInput: Начало записи, файл: ${audioFile?.absolutePath}")
+                println("🎤 VoiceInput: Запись начата, файл: ${audioFile?.absolutePath}")
 
             } catch (e: Exception) {
                 _error.value = "Ошибка записи: ${e.message}"
+                println("❌ VoiceInput: Ошибка записи: ${e.message}")
                 e.printStackTrace()
                 cleanup()
             }
         }
     }
 
-    // Остановить запись
     fun stopRecording() {
+        println("🎤 VoiceInput: stopRecording вызван")
         try {
             mediaRecorder?.apply {
                 try {
                     stop()
+                    println("🎤 VoiceInput: MediaRecorder остановлен")
                 } catch (e: Exception) {
-                    // Игнорируем ошибки остановки
+                    println("⚠️ VoiceInput: Ошибка остановки: ${e.message}")
                 }
                 release()
             }
             mediaRecorder = null
 
-            // Останавливаем корутины
             stopTimers()
+            silenceDetectorJob?.cancel()
+            silenceDetectorJob = null
 
             _isRecording.value = false
             _audioLevel.value = 0f
@@ -139,25 +336,27 @@ class VoiceInputViewModel @Inject constructor(
 
         } catch (e: Exception) {
             _error.value = "Ошибка остановки записи: ${e.message}"
+            println("❌ VoiceInput: Ошибка остановки: ${e.message}")
             e.printStackTrace()
         }
     }
 
-    // Остановить запись и распознать текст
     fun stopRecordingAndRecognize(onResult: ((String) -> Unit)? = null) {
+        println("🎤 VoiceInput: stopRecordingAndRecognize вызван")
         stopRecording()
 
         audioFile?.let { file ->
             if (file.exists() && file.length() > 0) {
+                println("🎤 VoiceInput: Файл существует, размер: ${file.length()} байт")
                 recognizeAudio(file, onResult)
             } else {
                 _error.value = "Файл записи пуст или не существует"
+                println("❌ VoiceInput: Файл пуст или не существует")
                 onResult?.invoke("")
             }
         }
     }
 
-    // Распознать аудиофайл
     private fun recognizeAudio(file: File, onResult: ((String) -> Unit)? = null) {
         viewModelScope.launch {
             _isProcessing.value = true
@@ -165,10 +364,10 @@ class VoiceInputViewModel @Inject constructor(
             try {
                 println("🎤 VoiceInput: Отправка на распознавание, размер: ${file.length()} байт")
 
-                // Используем AMR кодек для распознавания
+                // Используем OPUS формат
                 val result = saluteSpeechService.recognizeSpeech(
                     audioFile = file,
-                    mimeType = "audio/amr"
+                    mimeType = "audio/ogg;codecs=opus"
                 )
 
                 if (result.isSuccess) {
@@ -176,9 +375,9 @@ class VoiceInputViewModel @Inject constructor(
                     _recognizedText.value = text
                     println("✅ VoiceInput: Распознано: \"$text\"")
 
-                    // Удаляем временный файл
                     try {
                         file.delete()
+                        println("🎤 VoiceInput: Временный файл удален")
                     } catch (e: Exception) {
                         println("⚠️ VoiceInput: Не удалось удалить файл: ${e.message}")
                     }
@@ -193,6 +392,7 @@ class VoiceInputViewModel @Inject constructor(
 
             } catch (e: Exception) {
                 _error.value = "Исключение при распознавании: ${e.message}"
+                println("❌ VoiceInput: Ошибка: ${e.message}")
                 e.printStackTrace()
                 onResult?.invoke("")
             } finally {
@@ -201,18 +401,16 @@ class VoiceInputViewModel @Inject constructor(
         }
     }
 
-    // ✅ ИСПРАВЛЕНО: Запуск таймера длительности с помощью корутин (вместо Timer)
     private fun startDurationTimer() {
         durationJob = viewModelScope.launch {
             while (_isRecording.value) {
                 val duration = (System.currentTimeMillis() - startTime) / 1000
                 _recordingDuration.value = duration.toInt()
-                delay(1000) // Задержка 1 секунда
+                delay(1000)
             }
         }
     }
 
-    // ✅ ИСПРАВЛЕНО: Запуск мониторинга уровня звука с помощью корутин (вместо Timer)
     private fun startAudioLevelMonitor() {
         audioLevelJob = viewModelScope.launch {
             while (_isRecording.value && mediaRecorder != null) {
@@ -224,15 +422,15 @@ class VoiceInputViewModel @Inject constructor(
                         0f
                     }
                     _audioLevel.value = level.coerceIn(0f, 100f) / 100f
+                    _isVoiceDetected.value = _audioLevel.value > 0.15f
                 } catch (e: Exception) {
                     // Игнорируем ошибки амплитуды
                 }
-                delay(100) // Задержка 100 мс
+                delay(100)
             }
         }
     }
 
-    // ✅ ИСПРАВЛЕНО: Остановка таймеров
     private fun stopTimers() {
         durationJob?.cancel()
         durationJob = null
@@ -240,24 +438,29 @@ class VoiceInputViewModel @Inject constructor(
         audioLevelJob = null
     }
 
-    // Создать файл для аудиозаписи
     private fun createAudioFile(): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val audioFileName = "VOICE_INPUT_${timeStamp}.amr"
+        val audioFileName = "VOICE_INPUT_${timeStamp}.ogg" // .ogg для OPUS
 
         val storageDir = File(context.cacheDir, "voice_recording")
         if (!storageDir.exists()) {
             storageDir.mkdirs()
+            println("🎤 VoiceInput: Создана директория: ${storageDir.absolutePath}")
         }
 
         return File(storageDir, audioFileName).apply {
             createNewFile()
+            println("🎤 VoiceInput: Создан файл: ${this.absolutePath}")
         }
     }
 
-    // Очистка
     private fun cleanup() {
+        println("🎤 VoiceInput: cleanup")
         stopTimers()
+        silenceDetectorJob?.cancel()
+        silenceDetectorJob = null
+        autoRestartJob?.cancel()
+        autoRestartJob = null
 
         try {
             mediaRecorder?.release()
@@ -275,21 +478,19 @@ class VoiceInputViewModel @Inject constructor(
 
         _isRecording.value = false
         _isProcessing.value = false
+        _isListening.value = false
         _audioLevel.value = 0f
         _recordingDuration.value = 0
     }
 
-    // Очистить распознанный текст
     fun clearRecognizedText() {
         _recognizedText.value = ""
     }
 
-    // Очистить ошибку
     fun clearError() {
         _error.value = null
     }
 
-    // Сбросить состояние
     fun reset() {
         cleanup()
         _recognizedText.value = ""
@@ -299,5 +500,6 @@ class VoiceInputViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         cleanup()
+        println("🎤 VoiceInputViewModel очищен")
     }
 }

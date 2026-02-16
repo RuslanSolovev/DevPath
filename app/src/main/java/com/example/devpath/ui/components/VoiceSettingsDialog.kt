@@ -12,8 +12,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.devpath.api.speech.SaluteSpeechConfig
 
 @Composable
 fun VoiceSettingsDialog(
@@ -35,7 +33,7 @@ fun VoiceSettingsDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.VoiceChat,
+                        Icons.Default.VoiceChat,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -50,7 +48,6 @@ fun VoiceSettingsDialog(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // ✅ КНОПКА ВКЛ/ВЫКЛ ОЗВУЧКИ
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -58,8 +55,7 @@ fun VoiceSettingsDialog(
                     ) {
                         Text(
                             text = "Озвучка ответов",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Medium
+                            style = MaterialTheme.typography.bodyLarge
                         )
                         Switch(
                             checked = isVoiceEnabled,
@@ -73,9 +69,8 @@ fun VoiceSettingsDialog(
                         )
                     }
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Divider(modifier = Modifier.padding(vertical = 4.dp))
 
-                    // === ЖЕНСКИЕ ГОЛОСА ===
                     Text(
                         text = "👩 Женские голоса (24kHz)",
                         style = MaterialTheme.typography.titleSmall,
@@ -96,9 +91,8 @@ fun VoiceSettingsDialog(
                         onClick = { onVoiceSelected("Ost_24000") }
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Divider(modifier = Modifier.padding(vertical = 8.dp))
 
-                    // === МУЖСКИЕ ГОЛОСА ===
                     Text(
                         text = "👨 Мужские голоса (24kHz)",
                         style = MaterialTheme.typography.titleSmall,
@@ -119,9 +113,8 @@ fun VoiceSettingsDialog(
                         onClick = { onVoiceSelected("Pon_24000") }
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Divider(modifier = Modifier.padding(vertical = 8.dp))
 
-                    // === СКОРОСТЬ РЕЧИ ===
                     Text(
                         text = "⚡ Скорость речи",
                         style = MaterialTheme.typography.titleSmall,
@@ -135,8 +128,7 @@ fun VoiceSettingsDialog(
                         Text(
                             text = "Медленно",
                             modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontSize = 12.sp
+                            style = MaterialTheme.typography.bodyMedium
                         )
 
                         Slider(
@@ -149,16 +141,14 @@ fun VoiceSettingsDialog(
                                 thumbColor = MaterialTheme.colorScheme.primary,
                                 activeTrackColor = MaterialTheme.colorScheme.primary,
                                 inactiveTrackColor = MaterialTheme.colorScheme.primaryContainer
-                            ),
-                            enabled = isVoiceEnabled // Блокируем если озвучка выключена
+                            )
                         )
 
                         Text(
                             text = "Быстро",
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                            fontSize = 12.sp
+                            textAlign = androidx.compose.ui.text.style.TextAlign.End
                         )
                     }
 
@@ -229,7 +219,7 @@ private fun VoiceOption(
 
             if (isSelected) {
                 Icon(
-                    imageVector = Icons.Default.Check,
+                    Icons.Default.Check,
                     contentDescription = "Выбрано",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(16.dp)

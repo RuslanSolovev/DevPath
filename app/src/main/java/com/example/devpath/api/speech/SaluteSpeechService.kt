@@ -8,7 +8,6 @@ import com.example.devpath.api.speech.models.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -160,33 +159,60 @@ class SaluteSpeechService {
                 .addQueryParameter("audio_encoding", when(mimeType) {
                     SaluteSpeechConfig.AUDIO_AMR -> "AMR"
                     SaluteSpeechConfig.AUDIO_OPUS -> "OPUS"
+                    "audio/x-pcm;bit=16;rate=16000" -> "PCM16"
                     else -> "AMR"
                 })
-                .addQueryParameter("sample_rate", SaluteSpeechConfig.DEFAULT_SAMPLE_RATE.toString())
+                .addQueryParameter("sample_rate", when(mimeType) {
+                    "audio/x-pcm;bit=16;rate=16000" -> "16000"
+                    else -> SaluteSpeechConfig.DEFAULT_SAMPLE_RATE.toString()
+                })
                 .build()
+
+            println("📤 SaluteSpeech Request URL: $url")
+            println("📤 Content-Type: $mimeType")
 
             val requestBody = audioBytes.toRequestBody(mimeType.toMediaType())
 
             val request = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $accessToken")
-                .header("Content-Type", mimeType)
+                .header("Content-Type", mimeType) // ИСПРАВЛЕНО: убраны лишние символы
                 .post(requestBody)
                 .build()
 
             client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string() ?: ""
+                println("📥 SaluteSpeech Response: $responseBody")
+
                 if (response.isSuccessful) {
-                    val responseBody = response.body?.string() ?: ""
-                    println("✅ SaluteSpeech: Распознавание успешно")
+                    try {
+                        // Пробуем распарсить как SimpleRecognitionResponse (массив строк)
+                        val simpleResponse = json.decodeFromString<SimpleRecognitionResponse>(responseBody)
+                        val text = simpleResponse.result.firstOrNull() ?: ""
 
-                    val recognitionResponse = json.decodeFromString<SaluteSpeechRecognitionResponse>(responseBody)
-                    println("📝 SaluteSpeech: Распознанный текст: ${recognitionResponse.result.text}")
-
-                    Result.success(recognitionResponse.result.text)
+                        if (text.isNotEmpty()) {
+                            println("✅ SaluteSpeech: Распознано: \"$text\"")
+                            Result.success(text)
+                        } else {
+                            // Если пустой результат, пробуем другой формат
+                            try {
+                                val fullResponse = json.decodeFromString<SaluteSpeechRecognitionResponse>(responseBody)
+                                val resultText = fullResponse.result.text ?: ""
+                                println("✅ SaluteSpeech: Распознано (alt): \"$resultText\"")
+                                Result.success(resultText)
+                            } catch (e: Exception) {
+                                println("⚠️ SaluteSpeech: Пустой результат распознавания")
+                                Result.success("")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        println("❌ SaluteSpeech: Ошибка парсинга JSON: ${e.message}")
+                        println("JSON input: $responseBody")
+                        Result.failure(Exception("Ошибка формата ответа: ${e.message}"))
+                    }
                 } else {
-                    val errorBody = response.body?.string() ?: ""
-                    println("❌ SaluteSpeech: Ошибка распознавания ${response.code}: $errorBody")
-                    Result.failure(Exception("STT Error: ${response.code} - $errorBody"))
+                    println("❌ SaluteSpeech: Ошибка распознавания ${response.code}: $responseBody")
+                    Result.failure(Exception("STT Error: ${response.code} - $responseBody"))
                 }
             }
         } catch (e: Exception) {

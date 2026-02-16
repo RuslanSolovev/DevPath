@@ -41,13 +41,18 @@ class ChatViewModel @Inject constructor(
     private val _savedSessionId = MutableStateFlow<Long?>(null)
     val savedSessionId: StateFlow<Long?> = _savedSessionId.asStateFlow()
 
+    private val _currentSessionTitle = MutableStateFlow<String?>(null)
+    val currentSessionTitle: StateFlow<String?> = _currentSessionTitle.asStateFlow()
+
+    private val _isHistoryMode = MutableStateFlow(false)
+    val isHistoryMode: StateFlow<Boolean> = _isHistoryMode.asStateFlow()
+
     private val currentUserId = Firebase.auth.currentUser?.uid ?: "anonymous"
 
     companion object {
-        const val MAX_HISTORY_MESSAGES = 50 // Максимум сообщений для контекста
+        const val MAX_HISTORY_MESSAGES = 50
     }
 
-    // Системный промпт
     private val systemPrompt = """
         Ты - эксперт по программированию на Kotlin и Android разработке.
         Отвечай на русском языке.
@@ -79,7 +84,6 @@ class ChatViewModel @Inject constructor(
                         content = systemPrompt
                     ))
 
-                    // Берем последние N сообщений для контекста
                     val recentMessages = _messages.value.takeLast(MAX_HISTORY_MESSAGES)
                     recentMessages.forEach { msg ->
                         add(GigaChatMessage(
@@ -109,6 +113,10 @@ class ChatViewModel @Inject constructor(
                     usage?.let {
                         println("📊 GigaChat: prompt=${it.promptTokens}, completion=${it.completionTokens}, total=${it.totalTokens}")
                     }
+
+                    if (_isHistoryMode.value) {
+                        _isHistoryMode.value = false
+                    }
                 } else {
                     val exception = result.exceptionOrNull()
                     _error.value = "Ошибка: ${exception?.message ?: "Неизвестная ошибка"}"
@@ -134,10 +142,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * ✅ СОХРАНИТЬ ТЕКУЩИЙ ЧАТ В ROOM
-     */
-    fun saveCurrentChat() {
+    fun saveCurrentChat(customTitle: String? = null) {
         viewModelScope.launch {
             try {
                 val messages = _messages.value
@@ -146,15 +151,19 @@ class ChatViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Создаем заголовок из первого сообщения пользователя
-                val firstUserMessage = messages.firstOrNull { it.isUser }?.text ?: "Новый чат"
-                val title = if (firstUserMessage.length > 30) {
-                    firstUserMessage.take(30) + "..."
-                } else {
-                    firstUserMessage
+                if (_savedSessionId.value != null && !_isHistoryMode.value) {
+                    updateExistingChat(customTitle)
+                    return@launch
                 }
 
-                // Превью из последнего сообщения
+                val title = when {
+                    !customTitle.isNullOrBlank() -> customTitle
+                    else -> {
+                        val firstUserMessage = messages.firstOrNull { it.isUser }?.text ?: "Новый чат"
+                        if (firstUserMessage.length > 30) firstUserMessage.take(30) + "..." else firstUserMessage
+                    }
+                }
+
                 val preview = messages.lastOrNull()?.text?.take(50) ?: ""
 
                 val session = ChatSession(
@@ -165,11 +174,11 @@ class ChatViewModel @Inject constructor(
                     timestamp = System.currentTimeMillis()
                 )
 
-                // Сохраняем сессию
                 val sessionId = database.chatSessionDao().insertSession(session)
                 _savedSessionId.value = sessionId
+                _currentSessionTitle.value = title
+                _isHistoryMode.value = false
 
-                // Сохраняем сообщения
                 val storedMessages = messages.mapIndexed { index, msg ->
                     StoredMessage(
                         sessionId = sessionId,
@@ -181,16 +190,14 @@ class ChatViewModel @Inject constructor(
                 }
                 database.chatSessionDao().insertMessages(*storedMessages.toTypedArray())
 
-                _success.value = "✅ Диалог сохранен"
+                _success.value = "✅ Диалог сохранен как \"$title\""
 
-                // Сбрасываем сообщение через 3 секунды
                 viewModelScope.launch {
                     delay(3000)
                     _success.value = null
-                    _savedSessionId.value = null
                 }
 
-                println("💾 Чат сохранен: ID=$sessionId, сообщений=${messages.size}")
+                println("💾 Чат сохранен: ID=$sessionId, название=$title, сообщений=${messages.size}")
 
             } catch (e: Exception) {
                 _error.value = "Ошибка сохранения: ${e.message}"
@@ -200,14 +207,71 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * ✅ ЗАГРУЗИТЬ СОХРАНЕННЫЙ ЧАТ ПО ID
-     */
+    private suspend fun updateExistingChat(customTitle: String? = null) {
+        try {
+            val sessionId = _savedSessionId.value ?: return
+            val messages = _messages.value
+            val oldSession = database.chatSessionDao().getSession(sessionId)
+
+            if (oldSession == null) {
+                _savedSessionId.value = null
+                saveCurrentChat(customTitle)
+                return
+            }
+
+            val title = if (!customTitle.isNullOrBlank()) {
+                customTitle
+            } else {
+                _currentSessionTitle.value ?: oldSession.title
+            }
+
+            val preview = messages.lastOrNull()?.text?.take(50) ?: oldSession.preview
+
+            val updatedSession = oldSession.copy(
+                title = title,
+                preview = preview,
+                messageCount = messages.size,
+                timestamp = System.currentTimeMillis()
+            )
+
+            database.chatSessionDao().updateSession(updatedSession)
+            _currentSessionTitle.value = title
+
+            database.chatSessionDao().deleteMessages(sessionId)
+
+            val storedMessages = messages.mapIndexed { index, msg ->
+                StoredMessage(
+                    sessionId = sessionId,
+                    text = msg.text,
+                    isUser = msg.isUser,
+                    timestamp = msg.timestamp,
+                    orderIndex = index
+                )
+            }
+            database.chatSessionDao().insertMessages(*storedMessages.toTypedArray())
+
+            _success.value = "✅ Диалог обновлен как \"$title\""
+
+            viewModelScope.launch {
+                delay(3000)
+                _success.value = null
+            }
+
+            println("🔄 Чат обновлен: ID=$sessionId, название=$title, сообщений=${messages.size}")
+
+        } catch (e: Exception) {
+            _error.value = "Ошибка обновления: ${e.message}"
+            println("❌ Ошибка обновления чата: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
     fun loadChatSession(sessionId: Long) {
         viewModelScope.launch {
             try {
                 _isLoading.value = true
                 _error.value = null
+                _isHistoryMode.value = true
 
                 val messagesFlow = database.chatSessionDao().getMessages(sessionId)
                 messagesFlow.collect { storedMessages ->
@@ -220,6 +284,10 @@ class ChatViewModel @Inject constructor(
                     }
                     _messages.value = loadedMessages
                     _savedSessionId.value = sessionId
+
+                    val session = database.chatSessionDao().getSession(sessionId)
+                    _currentSessionTitle.value = session?.title ?: "Загруженный чат"
+
                     _success.value = "✅ Диалог загружен"
 
                     viewModelScope.launch {
@@ -229,7 +297,6 @@ class ChatViewModel @Inject constructor(
 
                     println("📂 Чат загружен: ID=$sessionId, сообщений=${loadedMessages.size}")
 
-                    // ✅ ВАЖНО: Сбрасываем isLoading СРАЗУ после загрузки!
                     _isLoading.value = false
                 }
 
@@ -237,25 +304,22 @@ class ChatViewModel @Inject constructor(
                 _error.value = "Ошибка загрузки: ${e.message}"
                 println("❌ Ошибка загрузки чата: ${e.message}")
                 e.printStackTrace()
-                _isLoading.value = false // Сбрасываем даже при ошибке
+                _isLoading.value = false
+                _isHistoryMode.value = false
             }
         }
     }
 
-    /**
-     * ✅ ОЧИСТИТЬ ЧАТ
-     */
     fun clearChat() {
         _messages.value = emptyList()
         _error.value = null
         _success.value = null
         _savedSessionId.value = null
-        println("🧹 Чат очищен")
+        _currentSessionTitle.value = null
+        _isHistoryMode.value = false
+        println("🧹 Чат очищен - начата новая тема")
     }
 
-    /**
-     * ✅ УДАЛИТЬ СОХРАНЕННЫЙ ЧАТ
-     */
     fun deleteSavedChat(sessionId: Long) {
         viewModelScope.launch {
             try {
@@ -264,6 +328,14 @@ class ChatViewModel @Inject constructor(
                     database.chatSessionDao().deleteMessages(sessionId)
                     database.chatSessionDao().deleteSession(it)
                     println("🗑️ Чат удален: ID=$sessionId")
+
+                    if (_savedSessionId.value == sessionId) {
+                        _savedSessionId.value = null
+                        _currentSessionTitle.value = null
+                        _messages.value = emptyList()
+                        _isHistoryMode.value = false
+                    }
+
                     _success.value = "✅ Чат удален"
 
                     viewModelScope.launch {
@@ -278,17 +350,11 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * ✅ ПРИНУДИТЕЛЬНО СБРОСИТЬ ЗАГРУЗКУ
-     */
     fun forceResetLoading() {
         _isLoading.value = false
         println("🔄 Принудительный сброс isLoading")
     }
 
-    /**
-     * ✅ ОБРАБОТКА ПРИМЕРОВ ВОПРОСОВ
-     */
     fun handleExampleQuestion(questionType: String) {
         val question = when (questionType) {
             "val_var" -> "Объясни разницу между val и var в Kotlin. Приведи примеры использования и объясни, когда что использовать."
@@ -303,9 +369,6 @@ class ChatViewModel @Inject constructor(
         sendMessage(question)
     }
 
-    /**
-     * ✅ ПОЛУЧИТЬ СТАТИСТИКУ ЧАТА
-     */
     fun getChatStats(): String {
         val messages = _messages.value
         val userMessages = messages.count { it.isUser }
@@ -323,25 +386,16 @@ class ChatViewModel @Inject constructor(
         """.trimIndent()
     }
 
-    /**
-     * ✅ ОЧИСТИТЬ ОШИБКУ
-     */
     fun clearError() {
         _error.value = null
     }
 
-    /**
-     * ✅ ОЧИСТИТЬ СООБЩЕНИЕ ОБ УСПЕХЕ
-     */
     fun clearSuccess() {
         _success.value = null
     }
 
-    /**
-     * ✅ ПРОВЕРИТЬ, СОХРАНЕН ЛИ ТЕКУЩИЙ ЧАТ
-     */
     fun isCurrentChatSaved(): Boolean {
-        return _savedSessionId.value != null
+        return _savedSessionId.value != null && !_isHistoryMode.value
     }
 
     override fun onCleared() {

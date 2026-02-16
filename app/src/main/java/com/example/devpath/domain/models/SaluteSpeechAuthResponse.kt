@@ -37,22 +37,68 @@ data class RecognitionOptions(
     val enablePartialResults: Boolean = false
 )
 
+// ИСПРАВЛЕНО: result может быть массивом строк или объектом
 @Serializable
 data class SaluteSpeechRecognitionResponse(
     @SerialName("result")
-    val result: RecognitionResult
+    val result: RecognitionResultData,
+
+    @SerialName("status")
+    val status: Int? = null,
+
+    @SerialName("emotions")
+    val emotions: List<EmotionData>? = null,
+
+    @SerialName("person_identity")
+    val personIdentity: PersonIdentityData? = null
 )
 
 @Serializable
-data class RecognitionResult(
+data class RecognitionResultData(
     @SerialName("text")
-    val text: String,
+    val text: String? = null,
 
     @SerialName("end_sec")
     val endSec: Double? = null,
 
     @SerialName("words")
     val words: List<Word>? = null
+) {
+    // Для обратной совместимости, если приходит массив строк
+    companion object {
+        fun fromStringList(strings: List<String>): RecognitionResultData {
+            return RecognitionResultData(
+                text = strings.firstOrNull() ?: ""
+            )
+        }
+    }
+}
+
+@Serializable
+data class EmotionData(
+    @SerialName("negative")
+    val negative: Float? = null,
+
+    @SerialName("neutral")
+    val neutral: Float? = null,
+
+    @SerialName("positive")
+    val positive: Float? = null
+)
+
+@Serializable
+data class PersonIdentityData(
+    @SerialName("age")
+    val age: String? = null,
+
+    @SerialName("gender")
+    val gender: String? = null,
+
+    @SerialName("age_score")
+    val ageScore: Float? = null,
+
+    @SerialName("gender_score")
+    val genderScore: Float? = null
 )
 
 @Serializable
@@ -86,4 +132,20 @@ data class SaluteSpeechSynthesisRequest(
 
     @SerialName("pitch")
     val pitch: Double? = null
+)
+
+// Добавляем упрощенную модель для парсинга, если API возвращает result как массив
+@Serializable
+data class SimpleRecognitionResponse(
+    @SerialName("result")
+    val result: List<String> = emptyList(),
+
+    @SerialName("status")
+    val status: Int? = null,
+
+    @SerialName("emotions")
+    val emotions: List<EmotionData>? = null,
+
+    @SerialName("person_identity")
+    val personIdentity: PersonIdentityData? = null
 )
