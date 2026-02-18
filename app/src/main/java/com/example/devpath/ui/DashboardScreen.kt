@@ -20,6 +20,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.example.devpath.data.repository.LocalThemeRepository
@@ -42,6 +44,7 @@ import com.example.devpath.ui.theme.AppTheme
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // Enum для главных вкладок
@@ -225,7 +228,12 @@ fun DashboardScreen(
     onNavigateToInterview: () -> Unit = {},
     parentNavController: NavHostController
 ) {
-    var currentTab by remember { mutableStateOf(MainTab.HOME) }
+    val currentUser = Firebase.auth.currentUser
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val progressRepo = viewModel.progressRepository
+
+    // Сохраняем текущую вкладку
+    var currentTab by rememberSaveable { mutableStateOf(MainTab.HOME) }
 
     // Мотивационные фразы
     val motivationalPhrases = remember {
@@ -247,27 +255,165 @@ fun DashboardScreen(
             "Код пишется не пальцами, а головой! 🤔"
         )
     }
-    var currentMotivationalPhrase by remember { mutableStateOf(motivationalPhrases.random()) }
-    var showMotivationalToast by remember { mutableStateOf(false) }
+    var currentMotivationalPhrase by rememberSaveable { mutableStateOf(motivationalPhrases.random()) }
+    var showMotivationalToast by rememberSaveable { mutableStateOf(false) }
 
     // Состояние меню
-    var showSettingsMenu by remember { mutableStateOf(false) }
+    var showSettingsMenu by rememberSaveable { mutableStateOf(false) }
+
+    // Состояние для данных пользователя
+    var userDisplayName by rememberSaveable { mutableStateOf("") }
+    var userPhotoUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var userIsLoading by rememberSaveable { mutableStateOf(true) }
+    var userTotalXP by rememberSaveable { mutableIntStateOf(0) }
+    var userLevel by rememberSaveable { mutableIntStateOf(1) }
+    var userProgress by remember { mutableStateOf<UserProgress?>(null) }
+    var dataLoaded by rememberSaveable { mutableStateOf(false) }
+    var refreshTrigger by rememberSaveable { mutableIntStateOf(0) } // Триггер для обновления
+
+    // Состояние для статистики
+    var completedLessonsCount by rememberSaveable { mutableIntStateOf(0) }
+    var completedTestsCount by rememberSaveable { mutableIntStateOf(0) }
+    var completedPracticeCount by rememberSaveable { mutableIntStateOf(0) }
+    var totalLessonsCount by rememberSaveable { mutableIntStateOf(12) }
+    var userAchievements by remember { mutableStateOf(achievementsList) }
+
+    // Ключ для идентификации пользователя
+    val userIdKey = remember(currentUser?.uid) { currentUser?.uid ?: "guest" }
+
+    // Функция для обновления статистики из прогресса
+    fun updateStatsFromProgress(progress: UserProgress) {
+        completedLessonsCount = progress.completedLessons.size
+        completedTestsCount = progress.quizResults.size
+        completedPracticeCount = progress.completedPracticeTasks.size
+        userTotalXP = progress.totalXP
+        userLevel = calculateLevelFromXP(userTotalXP)
+        userDisplayName = progress.displayName.ifEmpty {
+            currentUser?.displayName ?: "Гость"
+        }
+
+        // Обновляем достижения
+        userAchievements = achievementsList.map { achievement ->
+            val achieved = when (achievement.id) {
+                // Уроки
+                "first_lesson" -> completedLessonsCount >= 1
+                "lesson_3" -> completedLessonsCount >= 3
+                "lesson_5" -> completedLessonsCount >= 5
+                "lesson_10" -> completedLessonsCount >= 10
+                "all_lessons" -> completedLessonsCount >= totalLessonsCount
+
+                // Тесты
+                "first_test" -> completedTestsCount >= 1
+                "test_3" -> completedTestsCount >= 3
+                "test_5" -> completedTestsCount >= 5
+                "test_10" -> completedTestsCount >= 10
+
+                // Практика
+                "first_practice" -> completedPracticeCount >= 1
+                "practice_3" -> completedPracticeCount >= 3
+                "practice_5" -> completedPracticeCount >= 5
+                "practice_10" -> completedPracticeCount >= 10
+
+                // Специальные
+                "streak_3" -> progress.dailyStreak >= 3
+                "complete_all" -> completedLessonsCount >= totalLessonsCount &&
+                        completedTestsCount >= 10 &&
+                        completedPracticeCount >= 10
+
+                else -> false
+            }
+            achievement.copy(achieved = achieved)
+        }
+    }
+
+    // Функция для принудительного обновления данных
+    fun refreshData() {
+        if (currentUser != null) {
+            viewModel.viewModelScope.launch {
+                try {
+                    val freshProgress = progressRepo.loadProgress(currentUser.uid)
+                    freshProgress?.let { progress ->
+                        userProgress = progress
+                        updateStatsFromProgress(progress)
+                        println("DEBUG: Данные обновлены: уроков=${progress.completedLessons.size}, XP=${progress.totalXP}")
+                    }
+                } catch (e: Exception) {
+                    println("DEBUG: Ошибка обновления: ${e.message}")
+                }
+            }
+        }
+    }
+
+    // Загрузка данных пользователя (только один раз при первом запуске)
+    LaunchedEffect(userIdKey) {
+        if (!dataLoaded && currentUser != null) {
+            userIsLoading = true
+            try {
+                val localProgress = progressRepo.loadLocalProgress(currentUser.uid)
+                if (localProgress != null) {
+                    userProgress = localProgress
+                    updateStatsFromProgress(localProgress)
+                    userPhotoUrl = currentUser.photoUrl?.toString()
+
+                    if (localProgress.displayName.isBlank()) {
+                        onNavigateToProfile()
+                    }
+                } else {
+                    userDisplayName = currentUser.displayName ?: "Гость"
+                    onNavigateToProfile()
+                }
+
+                // Фоновая загрузка полных данных
+                launch {
+                    val fullProgress = progressRepo.loadProgress(currentUser.uid)
+                    fullProgress?.let { progress ->
+                        userProgress = progress
+                        updateStatsFromProgress(progress)
+                    }
+                }
+
+                dataLoaded = true
+            } catch (e: Exception) {
+                println("DEBUG: Ошибка загрузки: ${e.message}")
+                userDisplayName = currentUser.displayName ?: "Гость"
+            } finally {
+                userIsLoading = false
+            }
+        } else if (currentUser == null) {
+            userDisplayName = "Гость"
+            userIsLoading = false
+            dataLoaded = true
+        }
+    }
+
+    // Обновляем данные при возврате на главный экран
+    LaunchedEffect(currentTab, refreshTrigger) {
+        if (currentTab == MainTab.HOME && dataLoaded && currentUser != null) {
+            // Небольшая задержка, чтобы дать время базе данных обновиться
+            delay(300)
+            refreshData()
+        }
+    }
+
+    // Слушаем изменения в прогрессе
+    LaunchedEffect(userProgress) {
+        userProgress?.let { progress ->
+            updateStatsFromProgress(progress)
+        }
+    }
 
     Scaffold(
         topBar = {
             if (currentTab == MainTab.HOME) {
-                // TopAppBar будет отображаться только на главной вкладке
                 HomeTopAppBar(
                     onSettingsClick = { showSettingsMenu = true },
                     onMotivationalPhraseClick = {
                         currentMotivationalPhrase = motivationalPhrases.random()
                         showMotivationalToast = true
                     },
-                    onNavigateToTabs = onNavigateToTabs,
-                    onNavigateToProfile = onNavigateToProfile,
-                    onNavigateToPractice = onNavigateToPractice,
-                    onNavigateToQuiz = onNavigateToQuiz,
-                    onNavigateToInterview = onNavigateToInterview
+                    displayName = userDisplayName,
+                    userPhotoUrl = userPhotoUrl,
+                    isLoading = userIsLoading
                 )
             }
         },
@@ -287,8 +433,9 @@ fun DashboardScreen(
                         onClick = {
                             currentTab = tab
                             if (tab == MainTab.HOME) {
-                                // Обновляем мотивационную фразу при переходе на главную
                                 currentMotivationalPhrase = motivationalPhrases.random()
+                                // Увеличиваем триггер для обновления при возврате на главную
+                                refreshTrigger++
                             }
                         }
                     )
@@ -302,26 +449,38 @@ fun DashboardScreen(
             when (currentTab) {
                 MainTab.HOME -> {
                     HomeDashboardContent(
+                        displayName = userDisplayName,
+                        totalXP = userTotalXP,
+                        level = userLevel,
+                        userPhotoUrl = userPhotoUrl,
+                        isLoading = userIsLoading && !dataLoaded,
+                        dataLoaded = dataLoaded,
+                        motivationalPhrase = currentMotivationalPhrase,
+                        showMotivationalToast = showMotivationalToast,
+                        onHideMotivationalToast = { showMotivationalToast = false },
+                        // Данные для статистики
+                        completedLessonsCount = completedLessonsCount,
+                        completedTestsCount = completedTestsCount,
+                        completedPracticeCount = completedPracticeCount,
+                        totalLessonsCount = totalLessonsCount,
+                        userAchievements = userAchievements,
+                        // Колбэки навигации
                         onSignOut = onSignOut,
                         onNavigateToProfile = onNavigateToProfile,
                         onNavigateToPractice = onNavigateToPractice,
                         onNavigateToQuiz = onNavigateToQuiz,
                         onNavigateToInterview = onNavigateToInterview,
-                        onNavigateToTabs = onNavigateToTabs,
-                        currentMotivationalPhrase = currentMotivationalPhrase,
-                        showMotivationalToast = showMotivationalToast,
-                        onMotivationalPhraseClick = {
-                            currentMotivationalPhrase = motivationalPhrases.random()
-                            showMotivationalToast = true
-                        },
-                        onHideMotivationalToast = { showMotivationalToast = false }
+                        onNavigateToTabs = onNavigateToTabs
                     )
                 }
 
-
                 MainTab.CHAT -> {
                     ChatWithAIScreen(
-                        onBackToHome = { currentTab = MainTab.HOME } // ← стрелка переключит на главную
+                        onBackToHome = {
+                            currentTab = MainTab.HOME
+                            // Обновляем данные при возврате из чата
+                            refreshTrigger++
+                        }
                     )
                 }
 
@@ -424,46 +583,10 @@ fun DashboardScreen(
 fun HomeTopAppBar(
     onSettingsClick: () -> Unit,
     onMotivationalPhraseClick: () -> Unit,
-    onNavigateToTabs: (initialTab: String) -> Unit,
-    onNavigateToProfile: () -> Unit,
-    onNavigateToPractice: () -> Unit,
-    onNavigateToQuiz: () -> Unit,
-    onNavigateToInterview: () -> Unit
+    displayName: String,
+    userPhotoUrl: String?,
+    isLoading: Boolean
 ) {
-    val currentUser = Firebase.auth.currentUser
-    val viewModel: ProgressViewModel = hiltViewModel()
-    val progressRepo = viewModel.progressRepository
-    var displayName by remember { mutableStateOf("") }
-    var userPhotoUrl by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var userProgress by remember { mutableStateOf<UserProgress?>(null) }
-
-    LaunchedEffect(Unit) {
-        if (currentUser != null) {
-            isLoading = true
-            try {
-                // Загружаем локальные данные
-                val localProgress = progressRepo.loadLocalProgress(currentUser.uid)
-                if (localProgress != null) {
-                    userProgress = localProgress
-                    displayName = localProgress.displayName.ifEmpty {
-                        currentUser.displayName ?: "Гость"
-                    }
-                    userPhotoUrl = currentUser.photoUrl?.toString()
-                } else {
-                    displayName = currentUser.displayName ?: "Гость"
-                }
-            } catch (e: Exception) {
-                displayName = currentUser.displayName ?: "Гость"
-            } finally {
-                isLoading = false
-            }
-        } else {
-            isLoading = false
-            displayName = "Гость"
-        }
-    }
-
     SmallTopAppBar(
         title = {
             Row(
@@ -560,44 +683,37 @@ fun HomeTopAppBar(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeDashboardContent(
+    displayName: String,
+    totalXP: Int,
+    level: Int,
+    userPhotoUrl: String?,
+    isLoading: Boolean,
+    dataLoaded: Boolean,
+    motivationalPhrase: String,
+    showMotivationalToast: Boolean,
+    onHideMotivationalToast: () -> Unit,
+    // Данные для статистики
+    completedLessonsCount: Int,
+    completedTestsCount: Int,
+    completedPracticeCount: Int,
+    totalLessonsCount: Int,
+    userAchievements: List<Achievement>,
+    // Колбэки навигации
     onSignOut: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToPractice: () -> Unit,
     onNavigateToQuiz: () -> Unit,
     onNavigateToInterview: () -> Unit,
-    onNavigateToTabs: (initialTab: String) -> Unit,
-    currentMotivationalPhrase: String,
-    showMotivationalToast: Boolean,
-    onMotivationalPhraseClick: () -> Unit,
-    onHideMotivationalToast: () -> Unit
+    onNavigateToTabs: (initialTab: String) -> Unit
 ) {
-    val currentUser = Firebase.auth.currentUser
-    val viewModel: ProgressViewModel = hiltViewModel()
-    val progressRepo = viewModel.progressRepository
-    var displayName by remember { mutableStateOf("") }
-    var totalXP by remember { mutableIntStateOf(0) }
-    var level by remember { mutableIntStateOf(1) }
-    var userPhotoUrl by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-
-    // Добавляем состояние для хранения полного прогресса
-    var userProgress by remember { mutableStateOf<UserProgress?>(null) }
-
-    // Состояние для общего количества уроков
-    var totalLessonsCount by remember { mutableIntStateOf(12) }
-
     // Анимация прогресса
     val progressAnimation = remember { Animatable(0f) }
     val animatedLevel by animateFloatAsState(
         targetValue = level.toFloat(),
         animationSpec = tween(1000)
     )
-
-    val coroutineScope = rememberCoroutineScope()
-    var shouldShowProfile by remember { mutableStateOf(false) }
 
     // Функция для расчета XP для уровня
     fun calculateXPForLevel(level: Int): Int {
@@ -637,139 +753,20 @@ fun HomeDashboardContent(
         }
     }
 
-    // Функции для получения реальных данных
-    fun getCompletedLessonsCount(): Int {
-        return userProgress?.completedLessons?.size ?: 0
+    // Запускаем анимацию при изменении XP
+    LaunchedEffect(totalXP) {
+        if (dataLoaded) {
+            val progressPercent = calculateProgressToNextLevel(totalXP)
+            progressAnimation.animateTo(
+                targetValue = progressPercent,
+                animationSpec = tween(800, easing = LinearEasing)
+            )
+        }
     }
 
-    fun getCompletedTestsCount(): Int {
-        return userProgress?.quizResults?.size ?: 0
-    }
-
-    fun getCompletedPracticeCount(): Int {
-        return userProgress?.completedPracticeTasks?.size ?: 0
-    }
-
+    // Функция для расчета прогресса обучения
     fun calculateLearningProgress(): Float {
-        val completed = getCompletedLessonsCount()
-        return if (totalLessonsCount > 0) completed.toFloat() / totalLessonsCount else 0f
-    }
-
-    fun getUserAchievements(): List<Achievement> {
-        val progress = userProgress ?: return achievementsList
-
-        val completedLessons = getCompletedLessonsCount()
-        val completedTests = getCompletedTestsCount()
-        val completedPractice = getCompletedPracticeCount()
-        val dailyStreak = progress.dailyStreak
-
-        return achievementsList.map { achievement ->
-            val achieved = when (achievement.id) {
-                // Уроки
-                "first_lesson" -> completedLessons >= 1
-                "lesson_3" -> completedLessons >= 3
-                "lesson_5" -> completedLessons >= 5
-                "lesson_10" -> completedLessons >= 10
-                "all_lessons" -> completedLessons >= totalLessonsCount
-
-                // Тесты
-                "first_test" -> completedTests >= 1
-                "test_3" -> completedTests >= 3
-                "test_5" -> completedTests >= 5
-                "test_10" -> completedTests >= 10
-
-                // Практика
-                "first_practice" -> completedPractice >= 1
-                "practice_3" -> completedPractice >= 3
-                "practice_5" -> completedPractice >= 5
-                "practice_10" -> completedPractice >= 10
-
-                // Специальные
-                "streak_3" -> dailyStreak >= 3
-                "complete_all" -> completedLessons >= totalLessonsCount &&
-                        completedTests >= 10 &&
-                        completedPractice >= 10
-
-                else -> false
-            }
-
-            achievement.copy(achieved = achieved)
-        }
-    }
-
-    // Загрузка прогресса
-    LaunchedEffect(Unit) {
-        if (currentUser != null) {
-            isLoading = true
-            try {
-                // Загружаем локальные данные
-                val localProgress = progressRepo.loadLocalProgress(currentUser.uid)
-                if (localProgress != null) {
-                    userProgress = localProgress
-                    displayName = localProgress.displayName.ifEmpty {
-                        currentUser.displayName ?: "Гость"
-                    }
-                    totalXP = localProgress.totalXP
-                    // Рассчитываем уровень из XP
-                    level = calculateLevelFromXP(totalXP)
-                    userPhotoUrl = currentUser.photoUrl?.toString()
-
-                    // Анимация прогресса
-                    val progressPercent = calculateProgressToNextLevel(localProgress.totalXP)
-                    progressAnimation.animateTo(
-                        targetValue = progressPercent,
-                        animationSpec = tween(800, easing = LinearEasing)
-                    )
-
-                    if (localProgress.displayName.isBlank()) {
-                        shouldShowProfile = true
-                    }
-                } else {
-                    displayName = currentUser.displayName ?: "Гость"
-                    shouldShowProfile = true
-                }
-
-                // Фоновая загрузка полных данных
-                coroutineScope.launch {
-                    val fullProgress = progressRepo.loadProgress(currentUser.uid)
-                    fullProgress?.let { progress ->
-                        userProgress = progress
-                        displayName = progress.displayName.ifEmpty {
-                            currentUser.displayName ?: "Гость"
-                        }
-                        totalXP = progress.totalXP
-                        level = calculateLevelFromXP(progress.totalXP)
-
-                        val progressPercent = calculateProgressToNextLevel(progress.totalXP)
-                        progressAnimation.animateTo(
-                            targetValue = progressPercent,
-                            animationSpec = tween(800, easing = LinearEasing)
-                        )
-
-                        if (progress.displayName.isBlank()) {
-                            shouldShowProfile = true
-                        }
-                    }
-                }
-
-            } catch (e: Exception) {
-                println("DEBUG: Ошибка в Dashboard: ${e.message}")
-                displayName = currentUser.displayName ?: "Гость"
-            } finally {
-                isLoading = false
-            }
-        } else {
-            isLoading = false
-            displayName = "Гость"
-        }
-    }
-
-    // Автоматический переход к профилю
-    if (shouldShowProfile) {
-        LaunchedEffect(Unit) {
-            onNavigateToProfile()
-        }
-        return
+        return if (totalLessonsCount > 0) completedLessonsCount.toFloat() / totalLessonsCount else 0f
     }
 
     // Градиенты
@@ -793,12 +790,11 @@ fun HomeDashboardContent(
     val xpNeededForNextLevel = (xpForNextLevel - xpForCurrentLevel).coerceAtLeast(1)
 
     // Рассчитываем прогресс достижений
-    val userAchievements = getUserAchievements()
     val unlockedAchievementsCount = userAchievements.count { it.achieved }
     val totalAchievementsCount = userAchievements.size
 
     Box(modifier = Modifier.fillMaxSize()) {
-        if (isLoading) {
+        if (isLoading && !dataLoaded) {
             Column(
                 modifier = Modifier
                     .fillMaxSize(),
@@ -851,7 +847,7 @@ fun HomeDashboardContent(
                                     modifier = Modifier.size(24.dp)
                                 )
                                 Text(
-                                    currentMotivationalPhrase,
+                                    motivationalPhrase,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.weight(1f)
@@ -1020,7 +1016,7 @@ fun HomeDashboardContent(
                             description = "Основы программирования на Kotlin",
                             progress = calculateLearningProgress(),
                             duration = "",
-                            lessonsCompleted = getCompletedLessonsCount(),
+                            lessonsCompleted = completedLessonsCount,
                             totalLessons = totalLessonsCount,
                             onClick = { onNavigateToTabs("learning") }
                         )
@@ -1046,7 +1042,6 @@ fun HomeDashboardContent(
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        // Прогресс-бар достижений
                         LinearProgressIndicator(
                             progress = if (totalAchievementsCount > 0)
                                 unlockedAchievementsCount.toFloat() / totalAchievementsCount
@@ -1098,19 +1093,19 @@ fun HomeDashboardContent(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 StatCard(
-                                    value = getCompletedLessonsCount().toString(),
+                                    value = completedLessonsCount.toString(),
                                     label = "Пройдено уроков",
                                     icon = Icons.Rounded.MenuBook,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 StatCard(
-                                    value = getCompletedTestsCount().toString(),
+                                    value = completedTestsCount.toString(),
                                     label = "Пройдено тестов",
                                     icon = Icons.Rounded.CheckCircle,
                                     color = MaterialTheme.colorScheme.secondary
                                 )
                                 StatCard(
-                                    value = getCompletedPracticeCount().toString(),
+                                    value = completedPracticeCount.toString(),
                                     label = "Выполнено заданий",
                                     icon = Icons.Rounded.Code,
                                     color = MaterialTheme.colorScheme.tertiary
@@ -1172,8 +1167,7 @@ fun RecommendedModuleCard(
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = Modifier
-            .width(140.dp),
+        modifier = Modifier.width(140.dp),
         shape = RoundedCornerShape(20.dp),
         color = module.color.copy(alpha = 0.1f),
         onClick = onClick,
@@ -1229,8 +1223,7 @@ fun LearningPathCard(
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         onClick = onClick,
@@ -1369,8 +1362,7 @@ fun AchievementBadge(
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = Modifier
-            .width(140.dp),
+        modifier = Modifier.width(140.dp),
         shape = RoundedCornerShape(20.dp),
         color = if (achievement.achieved)
             MaterialTheme.colorScheme.secondaryContainer
@@ -1569,6 +1561,6 @@ data class InterviewStep(
     val id: Int,
     val title: String,
     val question: String,
-    val timeLimit: Int, // в секундах
+    val timeLimit: Int,
     val tips: List<String> = emptyList()
 )

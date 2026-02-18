@@ -1,4 +1,3 @@
-// ui/viewmodel/VoiceOutputViewModel.kt
 package com.example.devpath.ui.viewmodel
 
 import android.content.Context
@@ -70,6 +69,7 @@ class VoiceOutputViewModel @Inject constructor(
 
     // AudioTrack для воспроизведения PCM
     private var audioTrack: AudioTrack? = null
+    private var isPlaybackActive = false
 
     // Очередь сообщений
     private val speechQueue = mutableListOf<Pair<String, Long?>>()
@@ -278,6 +278,7 @@ class VoiceOutputViewModel @Inject constructor(
             }
 
             _isSpeaking.value = true
+            println("🎤 VoiceOutput: isSpeaking установлен в true")
             _currentSpeechText.value = text
             _error.value = null
 
@@ -315,6 +316,7 @@ class VoiceOutputViewModel @Inject constructor(
                     _error.value = "Ошибка синтеза: ${error?.message}"
                     println("❌ VoiceOutput: Ошибка синтеза: ${error?.message}")
                     _isSpeaking.value = false
+                    println("🎤 VoiceOutput: isSpeaking установлен в false (ошибка синтеза)")
                     _currentMessageId.value = null
                     return
                 }
@@ -327,6 +329,7 @@ class VoiceOutputViewModel @Inject constructor(
             } else {
                 _error.value = "Получены пустые аудиоданные"
                 _isSpeaking.value = false
+                println("🎤 VoiceOutput: isSpeaking установлен в false (пустые данные)")
                 _currentMessageId.value = null
             }
 
@@ -335,6 +338,7 @@ class VoiceOutputViewModel @Inject constructor(
             println("❌ VoiceOutput: Исключение: ${e.message}")
             e.printStackTrace()
             _isSpeaking.value = false
+            println("🎤 VoiceOutput: isSpeaking установлен в false (исключение)")
             _currentMessageId.value = null
         }
     }
@@ -345,7 +349,6 @@ class VoiceOutputViewModel @Inject constructor(
     private suspend fun playAudioData(audioData: ByteArray) = withContext(Dispatchers.IO) {
         try {
             val sampleRate = if (_selectedVoice.value.contains("24000")) 24000 else 16000
-
             println("🔊 VoiceOutput: Воспроизведение аудио (${audioData.size} байт, ${sampleRate}Hz)")
 
             val minBufferSize = AudioTrack.getMinBufferSize(
@@ -377,28 +380,57 @@ class VoiceOutputViewModel @Inject constructor(
             audioTrack?.write(audioData, 0, audioData.size)
             audioTrack?.play()
 
-            launchAnimation()
-
-            while (audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                delay(10)
+            // Запускаем анимацию в фоне, чтобы не блокировать основной поток
+            val animationJob = launch {
+                var progress = 0f
+                while (progress < 1f && audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                    progress += 0.01f
+                    _speakingProgress.value = progress.coerceIn(0f, 1f)
+                    delay(50)
+                }
             }
 
-            audioTrack?.stop()
+            // Рассчитываем максимальное время ожидания (длительность аудио + запас)
+            val expectedDurationMs = (audioData.size.toFloat() / (sampleRate * 2) * 1000).toLong()
+            val timeoutMs = expectedDurationMs + 5000 // +5 секунд
+            val startTime = System.currentTimeMillis()
+
+            println("⏱️ Ожидаемая длительность: ${expectedDurationMs}ms, таймаут: ${timeoutMs}ms")
+
+            // Ждём окончания воспроизведения или таймаута
+            while (audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                delay(100)
+                if (System.currentTimeMillis() - startTime > timeoutMs) {
+                    println("⚠️ Таймаут воспроизведения (${timeoutMs}ms), принудительно останавливаем")
+                    break
+                }
+            }
+
+            // Отменяем анимацию, если она ещё работает
+            animationJob.cancel()
+
+            // Останавливаем и освобождаем ресурсы
+            try {
+                audioTrack?.stop()
+            } catch (e: Exception) {
+                println("⚠️ Ошибка при stop: ${e.message}")
+            }
             audioTrack?.release()
             audioTrack = null
 
+            // ВАЖНО: сбрасываем флаг isSpeaking
             _isSpeaking.value = false
+            println("✅ VoiceOutput: Воспроизведение завершено, isSpeaking=false")
             _currentMessageId.value = null
             _speakingProgress.value = 0f
-
-            println("✅ VoiceOutput: Воспроизведение завершено")
 
         } catch (e: Exception) {
             println("❌ VoiceOutput: Ошибка воспроизведения: ${e.message}")
             e.printStackTrace()
-            _isSpeaking.value = false
-            _currentMessageId.value = null
             audioTrack = null
+            _isSpeaking.value = false
+            println("🎤 VoiceOutput: isSpeaking установлен в false (ошибка воспроизведения)")
+            _currentMessageId.value = null
         }
     }
 
@@ -407,7 +439,7 @@ class VoiceOutputViewModel @Inject constructor(
      */
     private suspend fun launchAnimation() {
         var progress = 0f
-        while (progress < 1f && _isSpeaking.value && audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
+        while (progress < 1f && isPlaybackActive && audioTrack?.playState == AudioTrack.PLAYSTATE_PLAYING) {
             progress += 0.01f
             _speakingProgress.value = progress.coerceIn(0f, 1f)
             delay(50)
@@ -486,6 +518,7 @@ class VoiceOutputViewModel @Inject constructor(
     fun stopSpeaking() {
         viewModelScope.launch {
             try {
+                isPlaybackActive = false
                 audioTrack?.apply {
                     if (playState == AudioTrack.PLAYSTATE_PLAYING) {
                         stop()
@@ -498,11 +531,11 @@ class VoiceOutputViewModel @Inject constructor(
                 isProcessingQueue = false
 
                 _isSpeaking.value = false
+                println("🔇 VoiceOutput: Озвучка остановлена, isSpeaking=false")
                 _speakingProgress.value = 0f
                 _currentSpeechText.value = ""
                 _currentMessageId.value = null
 
-                println("🔇 VoiceOutput: Озвучка остановлена, очередь очищена")
             } catch (e: Exception) {
                 println("❌ VoiceOutput: Ошибка остановки: ${e.message}")
             }
@@ -514,6 +547,7 @@ class VoiceOutputViewModel @Inject constructor(
      */
     fun stopCurrentPlayback() {
         try {
+            isPlaybackActive = false
             audioTrack?.apply {
                 if (playState == AudioTrack.PLAYSTATE_PLAYING) {
                     stop()
@@ -522,7 +556,7 @@ class VoiceOutputViewModel @Inject constructor(
             }
             audioTrack = null
             _isSpeaking.value = false
-            println("🔇 VoiceOutput: Текущее воспроизведение остановлено")
+            println("🔇 VoiceOutput: Текущее воспроизведение остановлено, isSpeaking=false")
         } catch (e: Exception) {
             println("❌ VoiceOutput: Ошибка остановки воспроизведения: ${e.message}")
         }

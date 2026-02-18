@@ -114,6 +114,10 @@ dependencies {
     // Coil для загрузки изображений
     implementation(libs.coil.compose)
 
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.0")
+
     implementation("androidx.media:media:1.6.0")
 
     // Gson - можно удалить если используете Kotlin Serialization
