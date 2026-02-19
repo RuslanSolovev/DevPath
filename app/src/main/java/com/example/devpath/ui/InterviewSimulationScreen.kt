@@ -30,7 +30,7 @@ import com.example.devpath.ui.viewmodel.InterviewViewModel
 @Composable
 fun InterviewSimulationScreen(
     navController: NavHostController,
-    viewModel: InterviewViewModel = hiltViewModel()
+    viewModel: InterviewViewModel
 ) {
     var currentStep by remember { mutableIntStateOf(0) }
     var isRecording by remember { mutableStateOf(false) }

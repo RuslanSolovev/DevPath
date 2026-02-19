@@ -1,6 +1,7 @@
 @file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 package com.example.devpath.ui
 
+import android.app.Activity
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,14 +44,13 @@ import coil.compose.AsyncImage
 import com.example.devpath.data.repository.LocalThemeRepository
 import com.example.devpath.domain.models.UserProgress
 import com.example.devpath.ui.theme.AppTheme
+import com.example.devpath.ui.viewmodel.ChatViewModel
+import com.example.devpath.ui.viewmodel.InterviewViewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import androidx.activity.compose.BackHandler
-import android.app.Activity
-import androidx.compose.ui.platform.LocalContext
 
 // Enum для главных вкладок
 enum class MainTab(
@@ -232,10 +233,15 @@ fun DashboardScreen(
     onNavigateToInterview: () -> Unit = {},
     parentNavController: NavHostController
 ) {
-    val activity = LocalContext.current as? Activity // Переименовал в activity
+    val activity = LocalContext.current as? Activity
     val currentUser = Firebase.auth.currentUser
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
+
+    // СОЗДАЁМ ViewModel ДЛЯ ЧАТА И ИНТЕРВЬЮ НА УРОВНЕ РОДИТЕЛЬСКОГО ЭКРАНА
+    // Они будут жить, пока жив DashboardScreen
+    val chatViewModel: ChatViewModel = hiltViewModel()
+    val interviewViewModel: InterviewViewModel = hiltViewModel()
 
     // Сохраняем текущую вкладку
     var currentTab by rememberSaveable { mutableStateOf(MainTab.HOME) }
@@ -484,17 +490,23 @@ fun DashboardScreen(
                 }
 
                 MainTab.CHAT -> {
+                    // Передаём готовый экземпляр chatViewModel
                     ChatWithAIScreen(
                         onBackToHome = {
                             currentTab = MainTab.HOME
                             refreshTrigger++
-                        }
+                        },
+                        viewModel = chatViewModel
+                        // Остальные параметры (voiceInputViewModel, voiceOutputViewModel)
+                        // создаются внутри экрана с помощью hiltViewModel()
                     )
                 }
 
                 MainTab.INTERVIEW_SIM -> {
+                    // Передаём готовый экземпляр interviewViewModel
                     InterviewSimulationScreen(
-                        navController = parentNavController
+                        navController = parentNavController,
+                        viewModel = interviewViewModel
                     )
                 }
             }
@@ -1417,8 +1429,6 @@ fun StatCard(
     }
 }
 
-
-
 @Composable
 fun RecommendedModuleCard(
     module: RecommendedModule,
@@ -1688,8 +1698,6 @@ fun AchievementBadge(
         }
     }
 }
-
-
 
 @Composable
 fun ThemeOption(

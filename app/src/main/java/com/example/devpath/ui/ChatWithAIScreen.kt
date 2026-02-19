@@ -57,7 +57,7 @@ import java.util.Locale
 @Composable
 fun ChatWithAIScreen(
     onBackToHome: () -> Unit,
-    viewModel: ChatViewModel = hiltViewModel(),
+    viewModel: ChatViewModel,
     voiceInputViewModel: VoiceInputViewModel = hiltViewModel(),
     voiceOutputViewModel: VoiceOutputViewModel = hiltViewModel()
 ) {
