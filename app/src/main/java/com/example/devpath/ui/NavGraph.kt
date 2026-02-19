@@ -1,5 +1,6 @@
 package com.example.devpath.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
@@ -12,13 +13,13 @@ import com.example.devpath.data.repository.LessonRepository
 import com.example.devpath.data.repository.PracticeRepository
 import com.example.devpath.data.repository.QuizRepository
 import com.example.devpath.ui.navigation.BottomNavigationScreen
+import com.example.devpath.ui.navigation.NavigationHandler
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.example.devpath.domain.models.GeneralTestResult
-import com.example.devpath.domain.models.QuizResult
 import androidx.navigation.compose.navigation
 
 @Composable
@@ -30,6 +31,9 @@ fun DevPathNavGraph() {
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
 
+    // Состояние для управления возвратом на dashboard
+    var shouldReturnToDashboard by remember { mutableStateOf(false) }
+
     // Синхронизация избранного при запуске
     LaunchedEffect(currentUser) {
         if (currentUser != null) {
@@ -40,13 +44,35 @@ fun DevPathNavGraph() {
         }
     }
 
-    NavHost(navController = navController, startDestination = startDestination) {
+    // Обработчик возврата на dashboard
+    LaunchedEffect(shouldReturnToDashboard) {
+        if (shouldReturnToDashboard) {
+            println("DEBUG: Возвращаемся на dashboard")
+            navController.popBackStack("dashboard", false)
+            shouldReturnToDashboard = false
+        }
+    }
+
+    // Глобальный обработчик навигации
+    NavigationHandler(
+        navController = navController,
+        onBackToDashboard = {
+            shouldReturnToDashboard = true
+        }
+    )
+
+    NavHost(
+        navController = navController,
+        startDestination = startDestination
+    ) {
         composable("auth") {
-            AuthScreen(onSuccess = {
-                navController.navigate("dashboard") {
-                    popUpTo("auth") { inclusive = true }
+            AuthScreen(
+                onSuccess = {
+                    navController.navigate("dashboard") {
+                        popUpTo("auth") { inclusive = true }
+                    }
                 }
-            })
+            )
         }
 
         composable("dashboard") {
@@ -58,7 +84,6 @@ fun DevPathNavGraph() {
                     }
                 },
                 onNavigateToTabs = { initialTab ->
-                    // Используем навигацию с параметром initialTab
                     navController.navigate("tabs/$initialTab")
                 },
                 onNavigateToProfile = {
@@ -86,7 +111,7 @@ fun DevPathNavGraph() {
             )
         }
 
-        // Вложенная навигация для вкладок - ВСЁ внутри этого графа
+        // Вложенная навигация для вкладок
         navigation(
             startDestination = "tabs_main/{initialTab}",
             route = "tabs/{initialTab}"
@@ -105,7 +130,11 @@ fun DevPathNavGraph() {
                             popUpTo(0) { inclusive = true }
                         }
                     },
-                    parentNavController = navController
+                    parentNavController = navController,
+                    onNavigateBack = {
+                        println("DEBUG: BottomNavigationScreen - запрос возврата на dashboard")
+                        shouldReturnToDashboard = true
+                    }
                 )
             }
 
@@ -122,7 +151,13 @@ fun DevPathNavGraph() {
                     lessonTitle = lesson.title,
                     lessonContent = lesson.theory,
                     lessonId = lessonId,
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        println("DEBUG: LessonScreen - запрос возврата")
+                        if (!navController.popBackStack()) {
+                            println("DEBUG: Нет предыдущего экрана, возвращаемся на dashboard")
+                            shouldReturnToDashboard = true
+                        }
+                    },
                     onNavigateToPractice = { taskId ->
                         navController.navigate("practice/$taskId")
                     },
@@ -146,7 +181,12 @@ fun DevPathNavGraph() {
 
                 PracticeTaskScreen(
                     task = task,
-                    onBack = { navController.popBackStack() }
+                    onBack = {
+                        println("DEBUG: PracticeTaskScreen - запрос возврата")
+                        if (!navController.popBackStack()) {
+                            shouldReturnToDashboard = true
+                        }
+                    }
                 )
             }
 
@@ -161,7 +201,12 @@ fun DevPathNavGraph() {
 
                 QuizQuestionScreen(
                     question = question,
-                    onBack = { navController.popBackStack() }
+                    onBack = {
+                        println("DEBUG: QuizQuestionScreen - запрос возврата")
+                        if (!navController.popBackStack()) {
+                            shouldReturnToDashboard = true
+                        }
+                    }
                 )
             }
 
@@ -169,7 +214,8 @@ fun DevPathNavGraph() {
             composable("quiz/general_test") {
                 GeneralTestScreenContent(
                     currentUserId = currentUser?.uid,
-                    navController = navController
+                    navController = navController,
+                    onBackToDashboard = { shouldReturnToDashboard = true }
                 )
             }
 
@@ -193,18 +239,23 @@ fun DevPathNavGraph() {
                         }
                     },
                     onBackToMain = {
-                        // Возвращаемся на главную вкладку dashboard
+                        println("DEBUG: TestResultsScreen - возврат на dashboard")
                         navController.navigate("dashboard") {
                             popUpTo("tabs/{initialTab}") { inclusive = true }
                             launchSingleTop = true
                         }
                     },
-                    onBack = { navController.popBackStack() }
+                    onBack = {
+                        println("DEBUG: TestResultsScreen - запрос возврата")
+                        if (!navController.popBackStack()) {
+                            shouldReturnToDashboard = true
+                        }
+                    }
                 )
             }
         }
 
-        // Старые маршруты для обратной совместимости (если где-то используются)
+        // Старые маршруты для обратной совместимости
         composable("tabs") {
             BottomNavigationScreen(
                 initialTab = "learning",
@@ -214,23 +265,30 @@ fun DevPathNavGraph() {
                         popUpTo("tabs") { inclusive = true }
                     }
                 },
-                parentNavController = navController
+                parentNavController = navController,
+                onNavigateBack = {
+                    println("DEBUG: Старый tabs - возврат на dashboard")
+                    shouldReturnToDashboard = true
+                }
             )
         }
 
         composable("lessons") {
-            LessonListScreen(onLessonClick = { lessonId ->
-                navController.navigate("lesson/$lessonId")
-            })
+            LessonListScreen(
+                onLessonClick = { lessonId ->
+                    navController.navigate("lesson/$lessonId")
+                }
+            )
         }
     }
 }
 
-// Выносим GeneralTestScreen в отдельную Composable функцию
+// Обновленный GeneralTestScreenContent
 @Composable
 fun GeneralTestScreenContent(
     currentUserId: String?,
-    navController: androidx.navigation.NavHostController
+    navController: androidx.navigation.NavHostController,
+    onBackToDashboard: () -> Unit
 ) {
     val allQuestions = QuizRepository.getQuizQuestions()
     val randomQuestions = remember(allQuestions) {
@@ -242,6 +300,14 @@ fun GeneralTestScreenContent(
     var resultCorrect by remember { mutableStateOf(0) }
     var resultTotal by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
+
+    // Добавляем BackHandler для этого экрана
+    BackHandler {
+        println("DEBUG: GeneralTestScreen - обработка назад")
+        if (!navController.popBackStack()) {
+            onBackToDashboard()
+        }
+    }
 
     // Эффект для навигации к результатам
     if (shouldNavigateToResults) {
@@ -265,17 +331,20 @@ fun GeneralTestScreenContent(
                     else 0
                 )
 
-                // Сохраняем в фоне используя coroutineScope
                 coroutineScope.launch {
                     testViewModel.progressRepository.saveGeneralTestResult(currentUserId, testResult)
                 }
             }
 
-            // Устанавливаем флаг и данные для перехода
             resultCorrect = quizResult.correctAnswers
             resultTotal = quizResult.totalQuestions
             shouldNavigateToResults = true
         },
-        onBack = { navController.popBackStack() }
+        onBack = {
+            println("DEBUG: GeneralTestScreen onBack")
+            if (!navController.popBackStack()) {
+                onBackToDashboard()
+            }
+        }
     )
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.devpath.api.speech.SaluteSpeechConfig
@@ -24,23 +25,32 @@ import javax.inject.Inject
 @HiltViewModel
 class VoiceOutputViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val saluteSpeechService: SaluteSpeechService
+    private val saluteSpeechService: SaluteSpeechService,
+    private val savedStateHandle: SavedStateHandle // Добавлено
 ) : ViewModel() {
 
-    // Состояния
+    // Состояния с восстановлением
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
-    private val _isVoiceEnabled = MutableStateFlow(true)
+    private val _isVoiceEnabled = MutableStateFlow(
+        savedStateHandle.get<Boolean>("isVoiceEnabled") ?: true
+    )
     val isVoiceEnabled: StateFlow<Boolean> = _isVoiceEnabled.asStateFlow()
 
-    private val _selectedVoice = MutableStateFlow(SaluteSpeechConfig.DEFAULT_VOICE_FEMALE)
+    private val _selectedVoice = MutableStateFlow(
+        savedStateHandle.get<String>("selectedVoice") ?: SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
+    )
     val selectedVoice: StateFlow<String> = _selectedVoice.asStateFlow()
 
-    private val _voiceSpeed = MutableStateFlow(1.0)
+    private val _voiceSpeed = MutableStateFlow(
+        savedStateHandle.get<Double>("voiceSpeed") ?: 1.0
+    )
     val voiceSpeed: StateFlow<Double> = _voiceSpeed.asStateFlow()
 
-    private val _selectedEmotion = MutableStateFlow<String?>(null)
+    private val _selectedEmotion = MutableStateFlow<String?>(
+        savedStateHandle.get("selectedEmotion")
+    )
     val selectedEmotion: StateFlow<String?> = _selectedEmotion.asStateFlow()
 
     private val _availableVoices = MutableStateFlow(SaluteSpeechConfig.AVAILABLE_VOICES)
@@ -61,7 +71,9 @@ class VoiceOutputViewModel @Inject constructor(
     private val _audioDuration = MutableStateFlow(0)
     val audioDuration: StateFlow<Int> = _audioDuration.asStateFlow()
 
-    private val _currentMessageId = MutableStateFlow<Long?>(null)
+    private val _currentMessageId = MutableStateFlow<Long?>(
+        savedStateHandle.get("currentMessageId")
+    )
     val currentMessageId: StateFlow<Long?> = _currentMessageId.asStateFlow()
 
     private val _cacheStats = MutableStateFlow("")
@@ -270,11 +282,13 @@ class VoiceOutputViewModel @Inject constructor(
 
             if (!isValidVoiceFormat(_selectedVoice.value)) {
                 _selectedVoice.value = SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
+                savedStateHandle.set("selectedVoice", _selectedVoice.value)
                 saveSettings()
             }
 
             if (messageId != null) {
                 _currentMessageId.value = messageId
+                savedStateHandle.set("currentMessageId", messageId)
             }
 
             _isSpeaking.value = true
@@ -318,6 +332,7 @@ class VoiceOutputViewModel @Inject constructor(
                     _isSpeaking.value = false
                     println("🎤 VoiceOutput: isSpeaking установлен в false (ошибка синтеза)")
                     _currentMessageId.value = null
+                    savedStateHandle.set("currentMessageId", null)
                     return
                 }
             } else {
@@ -331,6 +346,7 @@ class VoiceOutputViewModel @Inject constructor(
                 _isSpeaking.value = false
                 println("🎤 VoiceOutput: isSpeaking установлен в false (пустые данные)")
                 _currentMessageId.value = null
+                savedStateHandle.set("currentMessageId", null)
             }
 
         } catch (e: Exception) {
@@ -340,6 +356,7 @@ class VoiceOutputViewModel @Inject constructor(
             _isSpeaking.value = false
             println("🎤 VoiceOutput: isSpeaking установлен в false (исключение)")
             _currentMessageId.value = null
+            savedStateHandle.set("currentMessageId", null)
         }
     }
 
@@ -422,6 +439,7 @@ class VoiceOutputViewModel @Inject constructor(
             _isSpeaking.value = false
             println("✅ VoiceOutput: Воспроизведение завершено, isSpeaking=false")
             _currentMessageId.value = null
+            savedStateHandle.set("currentMessageId", null)
             _speakingProgress.value = 0f
 
         } catch (e: Exception) {
@@ -431,6 +449,7 @@ class VoiceOutputViewModel @Inject constructor(
             _isSpeaking.value = false
             println("🎤 VoiceOutput: isSpeaking установлен в false (ошибка воспроизведения)")
             _currentMessageId.value = null
+            savedStateHandle.set("currentMessageId", null)
         }
     }
 
@@ -457,6 +476,13 @@ class VoiceOutputViewModel @Inject constructor(
                 ?: SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
             _voiceSpeed.value = prefs.getFloat("voice_speed", 1.0f).toDouble().coerceIn(0.5, 2.0)
             _selectedEmotion.value = prefs.getString("selected_emotion", null)
+
+            // Сохраняем в SavedStateHandle
+            savedStateHandle.set("isVoiceEnabled", _isVoiceEnabled.value)
+            savedStateHandle.set("selectedVoice", _selectedVoice.value)
+            savedStateHandle.set("voiceSpeed", _voiceSpeed.value)
+            savedStateHandle.set("selectedEmotion", _selectedEmotion.value)
+
             println("📱 VoiceOutput: Настройки загружены")
         } catch (e: Exception) {
             println("❌ VoiceOutput: Ошибка загрузки настроек: ${e.message}")
@@ -505,6 +531,7 @@ class VoiceOutputViewModel @Inject constructor(
 
         println("⚠️ VoiceOutput: Исправляем некорректный голос: $currentVoice -> $correctedVoice")
         _selectedVoice.value = correctedVoice
+        savedStateHandle.set("selectedVoice", correctedVoice)
         saveSettings()
     }
 
@@ -535,6 +562,7 @@ class VoiceOutputViewModel @Inject constructor(
                 _speakingProgress.value = 0f
                 _currentSpeechText.value = ""
                 _currentMessageId.value = null
+                savedStateHandle.set("currentMessageId", null)
 
             } catch (e: Exception) {
                 println("❌ VoiceOutput: Ошибка остановки: ${e.message}")
@@ -567,6 +595,7 @@ class VoiceOutputViewModel @Inject constructor(
      */
     fun toggleVoiceEnabled() {
         _isVoiceEnabled.value = !_isVoiceEnabled.value
+        savedStateHandle.set("isVoiceEnabled", _isVoiceEnabled.value)
         saveSettings()
 
         if (!_isVoiceEnabled.value) {
@@ -638,6 +667,7 @@ class VoiceOutputViewModel @Inject constructor(
     fun setVoice(voiceId: String) {
         if (isValidVoiceFormat(voiceId)) {
             _selectedVoice.value = voiceId
+            savedStateHandle.set("selectedVoice", voiceId)
             saveSettings()
             val voiceInfo = getCurrentVoiceInfo()
             println("🎤 VoiceOutput: Выбран голос: ${voiceInfo?.name ?: voiceId} ($voiceId)")
@@ -651,6 +681,7 @@ class VoiceOutputViewModel @Inject constructor(
      */
     fun setVoiceSpeed(speed: Double) {
         _voiceSpeed.value = speed.coerceIn(0.5, 2.0)
+        savedStateHandle.set("voiceSpeed", _voiceSpeed.value)
         saveSettings()
         println("⚡ VoiceOutput: Скорость речи: ${_voiceSpeed.value}x")
     }
@@ -660,6 +691,7 @@ class VoiceOutputViewModel @Inject constructor(
      */
     fun setEmotion(emotion: String?) {
         _selectedEmotion.value = emotion
+        savedStateHandle.set("selectedEmotion", emotion)
         saveSettings()
         println("😊 VoiceOutput: Эмоция: ${emotion ?: "нейтральная"}")
     }
@@ -677,6 +709,12 @@ class VoiceOutputViewModel @Inject constructor(
         _selectedVoice.value = SaluteSpeechConfig.DEFAULT_VOICE_FEMALE
         _voiceSpeed.value = 1.0
         _selectedEmotion.value = null
+
+        savedStateHandle.set("isVoiceEnabled", true)
+        savedStateHandle.set("selectedVoice", SaluteSpeechConfig.DEFAULT_VOICE_FEMALE)
+        savedStateHandle.set("voiceSpeed", 1.0)
+        savedStateHandle.set("selectedEmotion", null)
+
         saveSettings()
         println("🔄 VoiceOutput: Сброс настроек")
     }
@@ -715,7 +753,14 @@ class VoiceOutputViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        // Сохраняем состояние
+        savedStateHandle.set("isVoiceEnabled", _isVoiceEnabled.value)
+        savedStateHandle.set("selectedVoice", _selectedVoice.value)
+        savedStateHandle.set("voiceSpeed", _voiceSpeed.value)
+        savedStateHandle.set("selectedEmotion", _selectedEmotion.value)
+        savedStateHandle.set("currentMessageId", _currentMessageId.value)
+
         stopSpeaking()
-        println("🔄 VoiceOutputViewModel очищен")
+        println("🔄 VoiceOutputViewModel очищен, состояние сохранено")
     }
 }

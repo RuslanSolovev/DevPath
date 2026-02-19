@@ -26,7 +26,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.navigation.NavHostController
 import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.data.repository.QuizRepository
 import com.example.devpath.domain.models.GeneralTestResult
@@ -35,15 +34,24 @@ import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.activity.compose.BackHandler
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuizScreen(
-    parentNavController: NavHostController? = null
+    parentNavController: NavHostController? = null,
+    onNavigateBack: () -> Unit
 ) {
+    // Добавляем BackHandler для этого экрана
+    BackHandler {
+        println("DEBUG: PracticeScreen BackHandler")
+        onNavigateBack()
+    }
+
     val allQuestions = QuizRepository.getQuizQuestions()
     val currentUser = Firebase.auth.currentUser
 

@@ -2,6 +2,7 @@
 package com.example.devpath.ui
 
 import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -46,6 +47,9 @@ import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.activity.compose.BackHandler
+import android.app.Activity
+import androidx.compose.ui.platform.LocalContext
 
 // Enum для главных вкладок
 enum class MainTab(
@@ -228,6 +232,7 @@ fun DashboardScreen(
     onNavigateToInterview: () -> Unit = {},
     parentNavController: NavHostController
 ) {
+    val activity = LocalContext.current as? Activity // Переименовал в activity
     val currentUser = Firebase.auth.currentUser
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
@@ -269,7 +274,7 @@ fun DashboardScreen(
     var userLevel by rememberSaveable { mutableIntStateOf(1) }
     var userProgress by remember { mutableStateOf<UserProgress?>(null) }
     var dataLoaded by rememberSaveable { mutableStateOf(false) }
-    var refreshTrigger by rememberSaveable { mutableIntStateOf(0) } // Триггер для обновления
+    var refreshTrigger by rememberSaveable { mutableIntStateOf(0) }
 
     // Состояние для статистики
     var completedLessonsCount by rememberSaveable { mutableIntStateOf(0) }
@@ -280,6 +285,14 @@ fun DashboardScreen(
 
     // Ключ для идентификации пользователя
     val userIdKey = remember(currentUser?.uid) { currentUser?.uid ?: "guest" }
+
+    // Обработка системной кнопки "Назад" - сворачивает приложение только на главном экране
+    BackHandler(
+        enabled = currentTab == MainTab.HOME
+    ) {
+        println("DEBUG: Системная кнопка Назад на главном экране - сворачиваем приложение")
+        activity?.moveTaskToBack(true)
+    }
 
     // Функция для обновления статистики из прогресса
     fun updateStatsFromProgress(progress: UserProgress) {
@@ -389,7 +402,6 @@ fun DashboardScreen(
     // Обновляем данные при возврате на главный экран
     LaunchedEffect(currentTab, refreshTrigger) {
         if (currentTab == MainTab.HOME && dataLoaded && currentUser != null) {
-            // Небольшая задержка, чтобы дать время базе данных обновиться
             delay(300)
             refreshData()
         }
@@ -434,7 +446,6 @@ fun DashboardScreen(
                             currentTab = tab
                             if (tab == MainTab.HOME) {
                                 currentMotivationalPhrase = motivationalPhrases.random()
-                                // Увеличиваем триггер для обновления при возврате на главную
                                 refreshTrigger++
                             }
                         }
@@ -458,13 +469,11 @@ fun DashboardScreen(
                         motivationalPhrase = currentMotivationalPhrase,
                         showMotivationalToast = showMotivationalToast,
                         onHideMotivationalToast = { showMotivationalToast = false },
-                        // Данные для статистики
                         completedLessonsCount = completedLessonsCount,
                         completedTestsCount = completedTestsCount,
                         completedPracticeCount = completedPracticeCount,
                         totalLessonsCount = totalLessonsCount,
                         userAchievements = userAchievements,
-                        // Колбэки навигации
                         onSignOut = onSignOut,
                         onNavigateToProfile = onNavigateToProfile,
                         onNavigateToPractice = onNavigateToPractice,
@@ -478,7 +487,6 @@ fun DashboardScreen(
                     ChatWithAIScreen(
                         onBackToHome = {
                             currentTab = MainTab.HOME
-                            // Обновляем данные при возврате из чата
                             refreshTrigger++
                         }
                     )
@@ -868,7 +876,7 @@ fun HomeDashboardContent(
                     }
                 }
 
-                // Карточка прогресса
+                // Карточка прогресса - УЛУЧШЕННАЯ АДАПТИВНАЯ ВЕРСИЯ
                 item {
                     Surface(
                         modifier = Modifier
@@ -885,82 +893,217 @@ fun HomeDashboardContent(
                                 .padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
+                            // Получаем цвета заранее
+                            val surfaceVariantColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            val primaryColor = MaterialTheme.colorScheme.primary
+                            val primaryContainerColor = MaterialTheme.colorScheme.primaryContainer
+                            val onPrimaryContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+                            val onSurfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+                            // Адаптивный контейнер для кругового прогресса
                             Box(
-                                modifier = Modifier.size(160.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f) // Сохраняем квадратную форму
+                                    .padding(8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(
-                                    progress = 1f,
-                                    modifier = Modifier.size(160.dp),
-                                    strokeWidth = 12.dp,
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                )
-                                CircularProgressIndicator(
-                                    progress = progressAnimation.value,
-                                    modifier = Modifier.size(160.dp),
-                                    strokeWidth = 12.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    trackColor = Color.Transparent
-                                )
+                                // Внешний круг (фон)
+                                Canvas(modifier = Modifier.matchParentSize()) {
+                                    val size = size.minDimension
+                                    drawCircle(
+                                        color = surfaceVariantColor,
+                                        radius = size / 2,
+                                        center = center
+                                    )
+                                }
+
+                                // Прогресс
+                                Canvas(modifier = Modifier.matchParentSize()) {
+                                    val size = size.minDimension
+                                    val sweepAngle = progressAnimation.value * 360f
+                                    drawArc(
+                                        color = primaryColor,
+                                        startAngle = -90f,
+                                        sweepAngle = sweepAngle,
+                                        useCenter = false,
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                            width = size * 0.075f, // Относительная толщина
+                                            cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                        ),
+                                        size = androidx.compose.ui.geometry.Size(size, size)
+                                    )
+                                }
+
+                                // Внутренний круг с уровнем
                                 Box(
                                     modifier = Modifier
-                                        .size(120.dp)
+                                        .fillMaxWidth(0.75f) // Относительный размер
+                                        .aspectRatio(1f)
                                         .clip(CircleShape)
                                         .background(
                                             Brush.radialGradient(
                                                 colors = listOf(
-                                                    MaterialTheme.colorScheme.primaryContainer,
-                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                                    primaryContainerColor,
+                                                    primaryContainerColor.copy(alpha = 0.5f)
                                                 )
                                             )
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
                                         Text(
                                             animatedLevel.toInt().toString(),
                                             style = MaterialTheme.typography.displayLarge.copy(
                                                 fontSize = 48.sp,
-                                                fontWeight = FontWeight.ExtraBold
+                                                fontWeight = FontWeight.ExtraBold,
+                                                lineHeight = 48.sp
                                             ),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            color = onPrimaryContainerColor,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier.padding(0.dp)
                                         )
                                         Text(
                                             "Уровень",
                                             style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                            color = onPrimaryContainerColor.copy(alpha = 0.8f)
                                         )
                                     }
                                 }
                             }
+
                             Spacer(modifier = Modifier.height(24.dp))
+
+                            // Статистика в три колонки
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
-                                StatItem(
-                                    value = "$totalXP",
-                                    label = "Всего XP",
-                                    icon = Icons.Filled.Star,
-                                    gradient = primaryGradient
-                                )
-                                StatItem(
-                                    value = "$xpInCurrentLevel/$xpNeededForNextLevel",
-                                    label = "До след. уровня",
-                                    icon = Icons.Filled.TrendingUp,
-                                    gradient = secondaryGradient
-                                )
-                                StatItem(
-                                    value = "$unlockedAchievementsCount/$totalAchievementsCount",
-                                    label = "Достижения",
-                                    icon = Icons.Filled.EmojiEvents,
-                                    gradient = Brush.linearGradient(
-                                        colors = listOf(
-                                            Color(0xFFF59E0B),
-                                            Color(0xFFF59E0B).copy(alpha = 0.8f)
+                                // Всего XP
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(CircleShape)
+                                            .background(primaryGradient),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Star,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(28.dp)
                                         )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "$totalXP",
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 24.sp
+                                        ),
+                                        color = onSurfaceColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                )
+                                    Text(
+                                        "Всего XP",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = onSurfaceVariantColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+
+                                // До следующего уровня
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(CircleShape)
+                                            .background(secondaryGradient),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.TrendingUp,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "$xpInCurrentLevel/$xpNeededForNextLevel",
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 24.sp
+                                        ),
+                                        color = onSurfaceColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        "До след. уровня",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = onSurfaceVariantColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+
+                                // Достижения
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.linearGradient(
+                                                    colors = listOf(
+                                                        Color(0xFFF59E0B),
+                                                        Color(0xFFF59E0B).copy(alpha = 0.8f)
+                                                    )
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.EmojiEvents,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "$unlockedAchievementsCount/$totalAchievementsCount",
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 24.sp
+                                        ),
+                                        color = onSurfaceColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        "Достижения",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = onSurfaceVariantColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
                             }
                         }
                     }
@@ -1088,28 +1231,131 @@ fun HomeDashboardContent(
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 modifier = Modifier.padding(bottom = 16.dp)
                             )
+
+                            // Три пункта статистики
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
-                                StatCard(
-                                    value = completedLessonsCount.toString(),
-                                    label = "Пройдено уроков",
-                                    icon = Icons.Rounded.MenuBook,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                StatCard(
-                                    value = completedTestsCount.toString(),
-                                    label = "Пройдено тестов",
-                                    icon = Icons.Rounded.CheckCircle,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                                StatCard(
-                                    value = completedPracticeCount.toString(),
-                                    label = "Выполнено заданий",
-                                    icon = Icons.Rounded.Code,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
+                                // Пройдено уроков
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.MenuBook,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        completedLessonsCount.toString(),
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 20.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        "Пройдено уроков",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                // Пройдено тестов
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.CheckCircle,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        completedTestsCount.toString(),
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 20.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        "Пройдено тестов",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                // Выполнено заданий
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Code,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.tertiary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        completedPracticeCount.toString(),
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 20.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        "Выполнено заданий",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -1121,45 +1367,57 @@ fun HomeDashboardContent(
     }
 }
 
+// Улучшенный StatCard для равномерного распределения
 @Composable
-fun StatItem(
+fun StatCard(
     value: String,
     label: String,
     icon: ImageVector,
-    gradient: Brush
+    color: Color,
+    modifier: Modifier = Modifier
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(120.dp)
+        modifier = modifier
+            .fillMaxWidth() // Занимает всю доступную ширину
     ) {
         Box(
             modifier = Modifier
-                .size(56.dp)
+                .size(48.dp)
                 .clip(CircleShape)
-                .background(gradient),
+                .background(color.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimary,
+                tint = color,
                 modifier = Modifier.size(24.dp)
             )
         }
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             value,
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Text(
             label,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
+
+
 
 @Composable
 fun RecommendedModuleCard(
@@ -1431,45 +1689,7 @@ fun AchievementBadge(
     }
 }
 
-@Composable
-fun StatCard(
-    value: String,
-    label: String,
-    icon: ImageVector,
-    color: Color
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(100.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(color.copy(alpha = 0.1f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            value,
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-    }
-}
+
 
 @Composable
 fun ThemeOption(

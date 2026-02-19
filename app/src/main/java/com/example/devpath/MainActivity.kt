@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,7 +47,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         enableEdgeToEdge()
+
+        // ВАЖНО: Перехватываем системную кнопку "Назад" на уровне Activity
+        // чтобы предотвратить закрытие приложения
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                println("DEBUG: onBackPressedDispatcher - перехвачено в MainActivity")
+                // НИЧЕГО НЕ ДЕЛАЕМ - позволим Compose обработать навигацию
+                // Не вызываем finish() и не вызываем isEnabled = false
+            }
+        })
+
+        if (savedInstanceState != null) {
+            println("DEBUG: MainActivity onCreate - восстановление после поворота/сворачивания")
+        } else {
+            println("DEBUG: MainActivity onCreate - первый запуск")
+        }
 
         // Запрос всех необходимых разрешений
         checkAndRequestAllPermissions()
@@ -60,10 +78,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        println("DEBUG: MainActivity onStart")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        println("DEBUG: MainActivity onResume")
+    }
+
+    override fun onPause() {
+        super.onPause()
+        println("DEBUG: MainActivity onPause")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        println("DEBUG: MainActivity onStop")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        println("DEBUG: MainActivity onSaveInstanceState - сохраняем состояние")
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        println("DEBUG: MainActivity onRestoreInstanceState - восстанавливаем состояние")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        println("DEBUG: MainActivity onDestroy - Activity уничтожена")
+    }
+
     private fun checkAndRequestAllPermissions() {
         val permissionsToRequest = mutableListOf<String>()
 
-        // Разрешение на запись аудио (для всех версий Android)
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.RECORD_AUDIO
@@ -72,7 +124,6 @@ class MainActivity : ComponentActivity() {
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
         }
 
-        // Разрешение на уведомления для Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,
@@ -83,7 +134,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Разрешение на запись в хранилище для старых версий Android
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             if (ContextCompat.checkSelfPermission(
                     this,
@@ -94,9 +144,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Запрашиваем разрешения, если есть что запрашивать
         if (permissionsToRequest.isNotEmpty()) {
-            // Показываем объяснение для аудио разрешения
             if (permissionsToRequest.contains(Manifest.permission.RECORD_AUDIO) &&
                 shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
             ) {

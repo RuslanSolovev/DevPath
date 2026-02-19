@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.devpath.api.speech.SaluteSpeechService
@@ -28,20 +29,29 @@ import javax.inject.Inject
 @HiltViewModel
 class VoiceInputViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val saluteSpeechService: SaluteSpeechService
+    private val saluteSpeechService: SaluteSpeechService,
+    private val savedStateHandle: SavedStateHandle // Добавлено
 ) : ViewModel() {
 
     // ==================== СОСТОЯНИЯ ====================
-    private val _isRecording = MutableStateFlow(false)
+    private val _isRecording = MutableStateFlow(
+        savedStateHandle.get<Boolean>("isRecording") ?: false
+    )
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
-    private val _isProcessing = MutableStateFlow(false)
+    private val _isProcessing = MutableStateFlow(
+        savedStateHandle.get<Boolean>("isProcessing") ?: false
+    )
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
-    private val _isListening = MutableStateFlow(false)
+    private val _isListening = MutableStateFlow(
+        savedStateHandle.get<Boolean>("isListening") ?: false
+    )
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
 
-    private val _recognizedText = MutableStateFlow("")
+    private val _recognizedText = MutableStateFlow(
+        savedStateHandle.get<String>("recognizedText") ?: ""
+    )
     val recognizedText: StateFlow<String> = _recognizedText.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
@@ -95,6 +105,10 @@ class VoiceInputViewModel @Inject constructor(
 
     init {
         println("🎤 VoiceInputViewModel инициализирован")
+        // Восстанавливаем состояние
+        if (_isListening.value) {
+            println("🎤 VoiceInput: Восстановление режима прослушивания")
+        }
     }
 
     // ==================== РАЗРЕШЕНИЯ ====================
@@ -172,6 +186,7 @@ class VoiceInputViewModel @Inject constructor(
         cancelAllJobs()
 
         _isListening.value = true
+        savedStateHandle.set("isListening", true)
         _error.value = null
         currentCallback = onResult
         isSilenceProcessing = false
@@ -187,6 +202,7 @@ class VoiceInputViewModel @Inject constructor(
     fun stopListening() {
         println("🎤 VoiceInput: stopListening вызван")
         _isListening.value = false
+        savedStateHandle.set("isListening", false)
         currentCallback = null
         stopRecording()
         cancelAllJobs()
@@ -227,6 +243,7 @@ class VoiceInputViewModel @Inject constructor(
                 }
 
                 _isRecording.value = true
+                savedStateHandle.set("isRecording", true)
                 _isVoiceDetected.value = false
                 isSpeaking = false
                 startTime = System.currentTimeMillis()
@@ -429,6 +446,7 @@ class VoiceInputViewModel @Inject constructor(
                 }
 
                 _isRecording.value = true
+                savedStateHandle.set("isRecording", true)
                 _error.value = null
                 startTime = System.currentTimeMillis()
 
@@ -468,6 +486,7 @@ class VoiceInputViewModel @Inject constructor(
             noiseCalibrationJob = null
 
             _isRecording.value = false
+            savedStateHandle.set("isRecording", false)
             _audioLevel.value = 0f
             _isVoiceDetected.value = false
             isSpeaking = false
@@ -503,6 +522,7 @@ class VoiceInputViewModel @Inject constructor(
     private fun recognizeAudio(file: File, onResult: ((String) -> Unit)? = null) {
         viewModelScope.launch {
             _isProcessing.value = true
+            savedStateHandle.set("isProcessing", true)
 
             try {
                 println("🎤 VoiceInput: Отправка на распознавание, размер: ${file.length()} байт")
@@ -515,6 +535,7 @@ class VoiceInputViewModel @Inject constructor(
                 if (result.isSuccess) {
                     val text = result.getOrNull() ?: ""
                     _recognizedText.value = text
+                    savedStateHandle.set("recognizedText", text)
                     println("✅ VoiceInput: Распознано: \"$text\"")
 
                     try {
@@ -539,6 +560,7 @@ class VoiceInputViewModel @Inject constructor(
                 onResult?.invoke("")
             } finally {
                 _isProcessing.value = false
+                savedStateHandle.set("isProcessing", false)
             }
         }
     }
@@ -632,8 +654,11 @@ class VoiceInputViewModel @Inject constructor(
         audioFile = null
 
         _isRecording.value = false
+        savedStateHandle.set("isRecording", false)
         _isProcessing.value = false
+        savedStateHandle.set("isProcessing", false)
         _isListening.value = false
+        savedStateHandle.set("isListening", false)
         _audioLevel.value = 0f
         _recordingDuration.value = 0
         _isVoiceDetected.value = false
@@ -648,6 +673,7 @@ class VoiceInputViewModel @Inject constructor(
     // ==================== ПУБЛИЧНЫЕ МЕТОДЫ ====================
     fun clearRecognizedText() {
         _recognizedText.value = ""
+        savedStateHandle.set("recognizedText", "")
     }
 
     fun clearError() {
@@ -657,12 +683,18 @@ class VoiceInputViewModel @Inject constructor(
     fun reset() {
         cleanup()
         _recognizedText.value = ""
+        savedStateHandle.set("recognizedText", "")
         _error.value = null
     }
 
     override fun onCleared() {
         super.onCleared()
+        // Сохраняем состояние
+        savedStateHandle.set("isRecording", _isRecording.value)
+        savedStateHandle.set("isProcessing", _isProcessing.value)
+        savedStateHandle.set("isListening", _isListening.value)
+        savedStateHandle.set("recognizedText", _recognizedText.value)
         cleanup()
-        println("🎤 VoiceInputViewModel очищен")
+        println("🎤 VoiceInputViewModel очищен, состояние сохранено")
     }
 }

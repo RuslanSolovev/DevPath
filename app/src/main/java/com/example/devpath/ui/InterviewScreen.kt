@@ -38,6 +38,7 @@ import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.domain.models.InterviewQuestion
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -46,8 +47,15 @@ import com.example.devpath.ui.viewmodel.ProgressViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InterviewScreen(
-    parentNavController: NavHostController? = null
+    parentNavController: NavHostController? = null,
+    onNavigateBack: () -> Unit
 ) {
+    // Добавляем BackHandler для этого экрана
+    BackHandler {
+        println("DEBUG: PracticeScreen BackHandler")
+        onNavigateBack()
+    }
+
     val childNavController = rememberNavController()
 
     NavHost(

@@ -120,6 +120,10 @@ dependencies {
 
     implementation("androidx.media:media:1.6.0")
 
+    implementation ("androidx.lifecycle:lifecycle-process:2.7.0")
+
+    implementation ("androidx.lifecycle:lifecycle-common:2.7.0")
+
     // Gson - можно удалить если используете Kotlin Serialization
     // implementation("com.google.code.gson:gson:2.10.1")
 

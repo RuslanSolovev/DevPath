@@ -1,6 +1,6 @@
-// ui/viewmodel/ChatViewModel.kt
 package com.example.devpath.ui.viewmodel
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.devpath.api.GigaChatService
@@ -23,13 +23,29 @@ import javax.inject.Inject
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val gigaChatService: GigaChatService,
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val _messages = MutableStateFlow<List<AIMessage>>(emptyList())
+    // Ключи для SavedStateHandle
+    companion object {
+        private const val KEY_MESSAGES = "messages"
+        private const val KEY_IS_LOADING = "isLoading"
+        private const val KEY_SAVED_SESSION_ID = "savedSessionId"
+        private const val KEY_CURRENT_SESSION_TITLE = "currentSessionTitle"
+        private const val KEY_IS_HISTORY_MODE = "isHistoryMode"
+        const val MAX_HISTORY_MESSAGES = 50
+    }
+
+    // Восстанавливаем состояние из SavedStateHandle
+    private val _messages = MutableStateFlow(
+        savedStateHandle.get<List<AIMessage>>(KEY_MESSAGES) ?: emptyList()
+    )
     val messages: StateFlow<List<AIMessage>> = _messages.asStateFlow()
 
-    private val _isLoading = MutableStateFlow(false)
+    private val _isLoading = MutableStateFlow(
+        savedStateHandle.get<Boolean>(KEY_IS_LOADING) ?: false
+    )
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
@@ -38,20 +54,22 @@ class ChatViewModel @Inject constructor(
     private val _success = MutableStateFlow<String?>(null)
     val success: StateFlow<String?> = _success.asStateFlow()
 
-    private val _savedSessionId = MutableStateFlow<Long?>(null)
+    private val _savedSessionId = MutableStateFlow<Long?>(
+        savedStateHandle.get(KEY_SAVED_SESSION_ID)
+    )
     val savedSessionId: StateFlow<Long?> = _savedSessionId.asStateFlow()
 
-    private val _currentSessionTitle = MutableStateFlow<String?>(null)
+    private val _currentSessionTitle = MutableStateFlow<String?>(
+        savedStateHandle.get(KEY_CURRENT_SESSION_TITLE)
+    )
     val currentSessionTitle: StateFlow<String?> = _currentSessionTitle.asStateFlow()
 
-    private val _isHistoryMode = MutableStateFlow(false)
+    private val _isHistoryMode = MutableStateFlow(
+        savedStateHandle.get<Boolean>(KEY_IS_HISTORY_MODE) ?: false
+    )
     val isHistoryMode: StateFlow<Boolean> = _isHistoryMode.asStateFlow()
 
     private val currentUserId = Firebase.auth.currentUser?.uid ?: "anonymous"
-
-    companion object {
-        const val MAX_HISTORY_MESSAGES = 50
-    }
 
     private val systemPrompt = """
         Ты - эксперт по программированию на Kotlin и Android разработке.
@@ -59,9 +77,27 @@ class ChatViewModel @Inject constructor(
         Будь дружелюбным и полезным.
         Форматируй код с помощью ```kotlin и ```.
         Давай подробные объяснения с примерами.
-        Если вопрос не связан с программированием, обязательо ответь на него но в конце предложи продолжить заниматься программированием .
+        Если вопрос не связан с программированием, обязательно ответь на него но в конце предложи продолжить заниматься программированием.
         Отвечай максимально подробно и информативно.
     """.trimIndent()
+
+    init {
+        // Логируем восстановление
+        val restoredCount = _messages.value.size
+        if (restoredCount > 0) {
+            println("🔄 ChatViewModel: Восстановлено $restoredCount сообщений")
+        }
+        println("🔄 ChatViewModel: Состояние загружено из SavedStateHandle")
+    }
+
+    // Сохраняем состояние в SavedStateHandle
+    private fun saveState() {
+        savedStateHandle[KEY_MESSAGES] = _messages.value
+        savedStateHandle[KEY_IS_LOADING] = _isLoading.value
+        savedStateHandle[KEY_SAVED_SESSION_ID] = _savedSessionId.value
+        savedStateHandle[KEY_CURRENT_SESSION_TITLE] = _currentSessionTitle.value
+        savedStateHandle[KEY_IS_HISTORY_MODE] = _isHistoryMode.value
+    }
 
     fun sendMessage(userMessage: String) {
         if (userMessage.isBlank()) return
@@ -73,8 +109,10 @@ class ChatViewModel @Inject constructor(
                     isUser = true
                 )
                 _messages.update { it + userAIMessage }
+                saveState()
 
                 _isLoading.value = true
+                saveState()
                 _error.value = null
                 _success.value = null
 
@@ -108,6 +146,7 @@ class ChatViewModel @Inject constructor(
                         isUser = false
                     )
                     _messages.update { it + aiAIMessage }
+                    saveState()
 
                     val usage = response?.usage
                     usage?.let {
@@ -116,6 +155,7 @@ class ChatViewModel @Inject constructor(
 
                     if (_isHistoryMode.value) {
                         _isHistoryMode.value = false
+                        saveState()
                     }
                 } else {
                     val exception = result.exceptionOrNull()
@@ -126,6 +166,7 @@ class ChatViewModel @Inject constructor(
                         isUser = false
                     )
                     _messages.update { it + errorMessage }
+                    saveState()
                 }
             } catch (e: Exception) {
                 _error.value = "Исключение: ${e.message}"
@@ -136,8 +177,10 @@ class ChatViewModel @Inject constructor(
                     isUser = false
                 )
                 _messages.update { it + errorMessage }
+                saveState()
             } finally {
                 _isLoading.value = false
+                saveState()
             }
         }
     }
@@ -178,6 +221,7 @@ class ChatViewModel @Inject constructor(
                 _savedSessionId.value = sessionId
                 _currentSessionTitle.value = title
                 _isHistoryMode.value = false
+                saveState()
 
                 val storedMessages = messages.mapIndexed { index, msg ->
                     StoredMessage(
@@ -215,6 +259,7 @@ class ChatViewModel @Inject constructor(
 
             if (oldSession == null) {
                 _savedSessionId.value = null
+                saveState()
                 saveCurrentChat(customTitle)
                 return
             }
@@ -236,6 +281,7 @@ class ChatViewModel @Inject constructor(
 
             database.chatSessionDao().updateSession(updatedSession)
             _currentSessionTitle.value = title
+            saveState()
 
             database.chatSessionDao().deleteMessages(sessionId)
 
@@ -270,8 +316,10 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _isLoading.value = true
+                saveState()
                 _error.value = null
                 _isHistoryMode.value = true
+                saveState()
 
                 val messagesFlow = database.chatSessionDao().getMessages(sessionId)
                 messagesFlow.collect { storedMessages ->
@@ -284,9 +332,11 @@ class ChatViewModel @Inject constructor(
                     }
                     _messages.value = loadedMessages
                     _savedSessionId.value = sessionId
+                    saveState()
 
                     val session = database.chatSessionDao().getSession(sessionId)
                     _currentSessionTitle.value = session?.title ?: "Загруженный чат"
+                    saveState()
 
                     _success.value = "✅ Диалог загружен"
 
@@ -298,6 +348,7 @@ class ChatViewModel @Inject constructor(
                     println("📂 Чат загружен: ID=$sessionId, сообщений=${loadedMessages.size}")
 
                     _isLoading.value = false
+                    saveState()
                 }
 
             } catch (e: Exception) {
@@ -306,6 +357,7 @@ class ChatViewModel @Inject constructor(
                 e.printStackTrace()
                 _isLoading.value = false
                 _isHistoryMode.value = false
+                saveState()
             }
         }
     }
@@ -317,6 +369,7 @@ class ChatViewModel @Inject constructor(
         _savedSessionId.value = null
         _currentSessionTitle.value = null
         _isHistoryMode.value = false
+        saveState()
         println("🧹 Чат очищен - начата новая тема")
     }
 
@@ -334,6 +387,7 @@ class ChatViewModel @Inject constructor(
                         _currentSessionTitle.value = null
                         _messages.value = emptyList()
                         _isHistoryMode.value = false
+                        saveState()
                     }
 
                     _success.value = "✅ Чат удален"
@@ -352,6 +406,7 @@ class ChatViewModel @Inject constructor(
 
     fun forceResetLoading() {
         _isLoading.value = false
+        saveState()
         println("🔄 Принудительный сброс isLoading")
     }
 
@@ -399,7 +454,9 @@ class ChatViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        // Сохраняем состояние перед очисткой
+        saveState()
+        println("🔄 ChatViewModel очищен, состояние сохранено в SavedStateHandle")
         super.onCleared()
-        println("🔄 ChatViewModel очищен")
     }
 }

@@ -1,5 +1,6 @@
 package com.example.devpath.ui.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,7 +15,8 @@ import com.example.devpath.ui.*
 fun BottomNavigationScreen(
     initialTab: String = "learning",
     onSignOut: () -> Unit,
-    parentNavController: NavHostController
+    parentNavController: NavHostController,
+    onNavigateBack: () -> Unit  // Новый параметр для возврата на dashboard
 ) {
     // Конвертируем строку в BottomTab
     val initialBottomTab = when (initialTab.lowercase()) {
@@ -25,6 +27,12 @@ fun BottomNavigationScreen(
     }
 
     var currentTab by remember { mutableStateOf(initialBottomTab) }
+
+    // Локальный BackHandler для BottomNavigation
+    BackHandler {
+        println("DEBUG: BottomNavigation BackHandler - возврат на dashboard")
+        onNavigateBack()
+    }
 
     Scaffold(
         bottomBar = {
@@ -48,13 +56,24 @@ fun BottomNavigationScreen(
         ) {
             when (currentTab) {
                 BottomTab.LEARNING -> {
-                    LessonListScreen(onLessonClick = { lessonId ->
-                        parentNavController.navigate("lesson/$lessonId")
-                    })
+                    LessonListScreen(
+                        onLessonClick = { lessonId ->
+                            parentNavController.navigate("lesson/$lessonId")
+                        }
+                    )
                 }
-                BottomTab.PRACTICE -> PracticeScreen(parentNavController = parentNavController)
-                BottomTab.QUIZ -> QuizScreen(parentNavController = parentNavController)
-                BottomTab.INTERVIEW -> InterviewScreen(parentNavController = parentNavController)
+                BottomTab.PRACTICE -> PracticeScreen(
+                    parentNavController = parentNavController,
+                    onNavigateBack = onNavigateBack
+                )
+                BottomTab.QUIZ -> QuizScreen(
+                    parentNavController = parentNavController,
+                    onNavigateBack = onNavigateBack
+                )
+                BottomTab.INTERVIEW -> InterviewScreen(
+                    parentNavController = parentNavController,
+                    onNavigateBack = onNavigateBack
+                )
             }
         }
     }

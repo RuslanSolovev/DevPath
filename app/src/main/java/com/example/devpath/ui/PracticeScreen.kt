@@ -23,22 +23,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.navigation.NavHostController
 import com.example.devpath.data.repository.PracticeRepository
-import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.domain.models.PracticeTask
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
+import androidx.activity.compose.BackHandler
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PracticeScreen(
-    parentNavController: NavHostController? = null
+    parentNavController: NavHostController? = null,
+    onNavigateBack: () -> Unit
 ) {
+    // Добавляем BackHandler для этого экрана
+    BackHandler {
+        println("DEBUG: PracticeScreen BackHandler")
+        onNavigateBack()
+    }
+
     val tasks = PracticeRepository.getPracticeTasks()
     val currentUser = Firebase.auth.currentUser
 
