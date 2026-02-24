@@ -47,6 +47,8 @@ import com.example.devpath.ui.theme.AppTheme
 import com.example.devpath.ui.viewmodel.ChatViewModel
 import com.example.devpath.ui.viewmodel.InterviewViewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
+import com.example.devpath.ui.viewmodel.VoiceInputViewModel
+import com.example.devpath.ui.viewmodel.VoiceOutputViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
@@ -238,8 +240,9 @@ fun DashboardScreen(
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
 
-    // СОЗДАЁМ ViewModel ДЛЯ ЧАТА И ИНТЕРВЬЮ НА УРОВНЕ РОДИТЕЛЬСКОГО ЭКРАНА
-    // Они будут жить, пока жив DashboardScreen
+    val voiceInputViewModel: VoiceInputViewModel = hiltViewModel()
+    val voiceOutputViewModel: VoiceOutputViewModel = hiltViewModel()
+
     val chatViewModel: ChatViewModel = hiltViewModel()
     val interviewViewModel: InterviewViewModel = hiltViewModel()
 
@@ -490,23 +493,25 @@ fun DashboardScreen(
                 }
 
                 MainTab.CHAT -> {
-                    // Передаём готовый экземпляр chatViewModel
+                    // Передаём готовый экземпляр chatViewModel и голосовые ViewModel
                     ChatWithAIScreen(
                         onBackToHome = {
                             currentTab = MainTab.HOME
                             refreshTrigger++
                         },
-                        viewModel = chatViewModel
-                        // Остальные параметры (voiceInputViewModel, voiceOutputViewModel)
-                        // создаются внутри экрана с помощью hiltViewModel()
+                        viewModel = chatViewModel,
+                        voiceInputViewModel = voiceInputViewModel,  // Добавлено
+                        voiceOutputViewModel = voiceOutputViewModel // Добавлено
                     )
                 }
 
                 MainTab.INTERVIEW_SIM -> {
-                    // Передаём готовый экземпляр interviewViewModel
+                    // Передаём готовый экземпляр interviewViewModel и голосовые ViewModel для интервью
                     InterviewSimulationScreen(
                         navController = parentNavController,
-                        viewModel = interviewViewModel
+                        viewModel = interviewViewModel,
+                        voiceInputViewModel = voiceInputViewModel,  // Добавлено
+                        voiceOutputViewModel = voiceOutputViewModel // Добавлено
                     )
                 }
             }

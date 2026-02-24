@@ -30,7 +30,7 @@ import javax.inject.Inject
 class VoiceInputViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val saluteSpeechService: SaluteSpeechService,
-    private val savedStateHandle: SavedStateHandle // Добавлено
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     // ==================== СОСТОЯНИЯ ====================
@@ -85,9 +85,9 @@ class VoiceInputViewModel @Inject constructor(
     private var noiseCalibrationJob: Job? = null
 
     private var lastVoiceTime = 0L
-    private val silenceThreshold = 1500L // 1.5 секунды тишины
+    private val silenceThreshold = 2000L // 1.5 секунды тишины
     private val requiredSilenceCount = (silenceThreshold / 100).toInt() // 15 при 100мс
-    private val maxSpeechDuration = 10000L // 10 секунд максимум записи
+    private val maxSpeechDuration = 20000L // 10 секунд максимум записи
     private var isSpeaking = false
     private var currentCallback: ((String) -> Unit)? = null
 
@@ -314,12 +314,15 @@ class VoiceInputViewModel @Inject constructor(
                         println("🎤 SilenceDetector: Распознано (принудительно): \"$text\"")
                         if (text.isNotBlank()) {
                             currentCallback?.invoke(text)
-                        }
-                        // ✅ ВАЖНО: Проверяем _isListening.value, а не isListening
-                        if (_isListening.value) {
-                            scheduleAutoRestart()
+                            // ✅ Есть голос – выключаем прослушивание до ответа ИИ
+                            stopListening()
                         } else {
-                            isSilenceProcessing = false
+                            // Тишина – продолжаем слушать
+                            if (_isListening.value) {
+                                scheduleAutoRestart()
+                            } else {
+                                isSilenceProcessing = false
+                            }
                         }
                     }
                     continue
@@ -357,12 +360,15 @@ class VoiceInputViewModel @Inject constructor(
                                 println("🎤 SilenceDetector: Распознано: \"$text\"")
                                 if (text.isNotBlank()) {
                                     currentCallback?.invoke(text)
-                                }
-                                // ✅ ВАЖНО: Проверяем _isListening.value
-                                if (_isListening.value) {
-                                    scheduleAutoRestart()
+                                    // ✅ Есть голос – выключаем прослушивание
+                                    stopListening()
                                 } else {
-                                    isSilenceProcessing = false
+                                    // Тишина – продолжаем слушать
+                                    if (_isListening.value) {
+                                        scheduleAutoRestart()
+                                    } else {
+                                        isSilenceProcessing = false
+                                    }
                                 }
                             }
                         }
