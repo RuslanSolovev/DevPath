@@ -4,6 +4,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -105,12 +106,24 @@ fun ChatWithAIScreen(
 
     // Флаг для логической блокировки микрофона во время озвучки
     var isMicrophoneBlocked by remember { mutableStateOf(false) }
-    // Флаг для блокировки автоматического включения микрофона во время озвучки
     var blockMicrophoneUntil by remember { mutableStateOf(0L) }
-    // Флаг для отслеживания, что микрофон был автоматически включен после озвучки
     var autoListeningActivated by remember { mutableStateOf(false) }
 
-    // Автоматическая отправка голосовых сообщений и ОЧИСТКА ПОЛЯ ВВОДА
+    // --- Улучшение: статус голосового режима ---
+    val voiceStatus = remember(
+        isVoiceModeActive, isListening, isRecording,
+        isLoading, isProcessing, isSpeaking
+    ) {
+        when {
+            !isVoiceModeActive -> null
+            isSpeaking -> "🔊 GigaChat отвечает..."
+            isLoading || isProcessing -> "🤖 Обработка запроса..."
+            isListening || isRecording -> "🎤 Слушаю... (говорите)"
+            else -> "🎤 Режим диалога"
+        }
+    }
+
+    // Автоматическая отправка голосовых сообщений и очистка поля ввода
     LaunchedEffect(pendingVoiceMessage) {
         pendingVoiceMessage?.let { text ->
             if (text.isNotBlank()) {
@@ -122,7 +135,7 @@ fun ChatWithAIScreen(
         }
     }
 
-    // ИСПРАВЛЕННЫЙ Таймер для снятия блокировки по расчетному времени
+    // Таймер для снятия блокировки по расчетному времени
     LaunchedEffect(blockMicrophoneUntil) {
         if (blockMicrophoneUntil > 0) {
             val now = System.currentTimeMillis()
@@ -131,20 +144,16 @@ fun ChatWithAIScreen(
                 delay(waitTime)
             }
 
-            // Ждем окончания озвучки с периодической проверкой
             var waitCounter = 0
             while (isSpeaking) {
                 waitCounter++
                 println("🎤 Озвучка еще идет, ждем окончания... проверка #$waitCounter")
-                delay(500) // Проверяем каждые 500мс
+                delay(500)
             }
 
-            // Снимаем логическую блокировку
             isMicrophoneBlocked = false
             blockMicrophoneUntil = 0
             println("🎤 Микрофон разблокирован по таймеру после ожидания")
-
-            // Здесь НЕ включаем микрофон, это сделает LaunchedEffect(isSpeaking)
         }
     }
 
@@ -154,18 +163,14 @@ fun ChatWithAIScreen(
 
         val lastMessage = messages.lastOrNull()
 
-        // Если последнее сообщение от ИИ и он закончил говорить
         if (lastMessage != null && !lastMessage.isUser && !isSpeaking && isVoiceEnabled) {
-            // Проверяем, не заблокирован ли микрофон
             if (isMicrophoneBlocked || System.currentTimeMillis() < blockMicrophoneUntil) {
                 println("🎤 Микрофон заблокирован, пропускаем включение")
                 return@LaunchedEffect
             }
 
-            // Ждем небольшую паузу после окончания озвучки
             delay(800)
 
-            // Включаем микрофон для следующего вопроса, если он еще не включен
             if (!isListening && !isRecording && !isProcessing) {
                 println("🎤 Автоматическое включение микрофона после ответа ИИ")
                 autoListeningActivated = true
@@ -193,51 +198,39 @@ fun ChatWithAIScreen(
             if (!lastMessage.isUser && isVoiceEnabled && lastMessage.timestamp != lastMessageId) {
                 lastMessageId = lastMessage.timestamp
 
-                // Останавливаем запись, если она идет
                 if (isRecording || isListening) {
                     println("🎤 Останавливаем запись перед озвучкой")
                     voiceInputViewModel.stopListening()
                 }
 
-                // Устанавливаем логическую блокировку микрофона
                 isMicrophoneBlocked = true
                 println("🎤 Логическая блокировка микрофона включена")
 
-                // Рассчитываем примерное время озвучки (примерно 0.5 сек на каждые 100 символов + база)
-                val estimatedSpeakingTime = (lastMessage.text.length / 100 * 1000) + 2000L // минимум 2 секунды
+                val estimatedSpeakingTime = (lastMessage.text.length / 100 * 1000) + 2000L
                 blockMicrophoneUntil = System.currentTimeMillis() + estimatedSpeakingTime
                 println("🎤 Блокируем микрофон на ${estimatedSpeakingTime}мс (${estimatedSpeakingTime/1000} сек) до ${Date(blockMicrophoneUntil)}")
 
-                // Сбрасываем флаг автоматического прослушивания
                 autoListeningActivated = false
 
-                // Озвучиваем ответ ИИ
                 voiceOutputViewModel.speakText(lastMessage.text, lastMessage.timestamp)
             }
         }
     }
 
-    // Исправленный LaunchedEffect(isSpeaking) – теперь он гарантированно включает микрофон после окончания озвучки
     LaunchedEffect(isSpeaking) {
         println("🎤 isSpeaking изменился: $isSpeaking")
         if (!isSpeaking) {
             println("🎤 Озвучка закончена, isSpeaking = false")
 
-            // Снимаем логическую блокировку
             isMicrophoneBlocked = false
             blockMicrophoneUntil = 0
             println("🎤 Логическая блокировка микрофона снята, можно слушать снова")
 
-            // Небольшая пауза перед включением микрофона
             delay(500)
 
-            // Если режим диалога все еще активен и микрофон выключен
             if (isVoiceModeActive && isVoiceEnabled && !isListening && !isRecording && !isProcessing) {
                 println("🎤 Автоматическое включение микрофона после окончания озвучки")
-
-                // Очищаем поле ввода
                 message = ""
-
                 voiceInputViewModel.startListening { recognizedText ->
                     pendingVoiceMessage = recognizedText
                 }
@@ -391,7 +384,6 @@ fun ChatWithAIScreen(
                 onVoiceModeToggle = {
                     isVoiceModeActive = !isVoiceModeActive
                     if (isVoiceModeActive && isVoiceEnabled) {
-                        // Проверяем, не заблокирован ли микрофон
                         if (isMicrophoneBlocked) {
                             println("🎤 Микрофон заблокирован, не включаем")
                             coroutineScope.launch {
@@ -404,9 +396,15 @@ fun ChatWithAIScreen(
                             voiceInputViewModel.startListening { recognizedText ->
                                 pendingVoiceMessage = recognizedText
                             }
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("🎤 Голосовой режим включен")
+                            }
                         }
                     } else {
                         voiceInputViewModel.stopListening()
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("🎤 Голосовой режим выключен")
+                        }
                     }
                 },
                 isVoiceEnabled = isVoiceEnabled,
@@ -416,7 +414,7 @@ fun ChatWithAIScreen(
                 isLoading = isLoading
             )
 
-            // ИНДИКАТОР РЕЖИМА ДИАЛОГА
+            // --- Улучшенный индикатор режима диалога ---
             if (isVoiceModeActive) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -439,20 +437,39 @@ fun ChatWithAIScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                             Text(
-                                "Режим непрерывного диалога",
+                                voiceStatus ?: "Режим непрерывного диалога",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                            // Анимированные точки для активных состояний
+                            if (isListening || isSpeaking || isLoading || isProcessing) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    repeat(3) { index ->
+                                        val infiniteTransition = rememberInfiniteTransition()
+                                        val alpha by infiniteTransition.animateFloat(
+                                            initialValue = 0.3f,
+                                            targetValue = 1f,
+                                            animationSpec = infiniteRepeatable(
+                                                animation = tween(500 + index * 200),
+                                                repeatMode = RepeatMode.Reverse
+                                            )
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(4.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha))
+                                        )
+                                    }
+                                }
+                            }
                         }
                         TextButton(
                             onClick = {
                                 isVoiceModeActive = false
                                 voiceInputViewModel.stopListening()
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        message = "🎤 Голосовой режим выключен",
-                                        duration = SnackbarDuration.Short
-                                    )
+                                    snackbarHostState.showSnackbar("🎤 Голосовой режим выключен")
                                 }
                             }
                         ) {
@@ -524,7 +541,6 @@ fun ChatWithAIScreen(
                     } else if (isListening) {
                         voiceInputViewModel.stopListening()
                     } else {
-                        // Проверяем, не заблокирован ли микрофон
                         if (isMicrophoneBlocked) {
                             println("🎤 Микрофон заблокирован, запись невозможна")
                             coroutineScope.launch {
@@ -541,7 +557,6 @@ fun ChatWithAIScreen(
                 onVoiceLongClick = {
                     isVoiceModeActive = !isVoiceModeActive
                     if (isVoiceModeActive && isVoiceEnabled) {
-                        // Проверяем, не заблокирован ли микрофон
                         if (isMicrophoneBlocked) {
                             println("🎤 Микрофон заблокирован, режим диалога не включается")
                             coroutineScope.launch {
@@ -555,25 +570,20 @@ fun ChatWithAIScreen(
                                 pendingVoiceMessage = recognizedText
                             }
                             coroutineScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    message = "🎤 Голосовой режим включен",
-                                    duration = SnackbarDuration.Short
-                                )
+                                snackbarHostState.showSnackbar("🎤 Голосовой режим включен")
                             }
                         }
                     } else {
                         voiceInputViewModel.stopListening()
                         coroutineScope.launch {
-                            snackbarHostState.showSnackbar(
-                                message = "🎤 Голосовой режим выключен",
-                                duration = SnackbarDuration.Short
-                            )
+                            snackbarHostState.showSnackbar("🎤 Голосовой режим выключен")
                         }
                     }
                 },
                 voiceInputViewModel = voiceInputViewModel,
                 isVoiceModeActive = isVoiceModeActive,
-                isMicrophoneBlocked = isMicrophoneBlocked
+                isMicrophoneBlocked = isMicrophoneBlocked,
+                isVoiceEnabled = isVoiceEnabled // для контекстного placeholder
             )
         }
 
@@ -677,7 +687,7 @@ fun PermissionDialog(
     )
 }
 
-// ==================== ПАНЕЛЬ ВВОДА ====================
+// ==================== ПАНЕЛЬ ВВОДА (с улучшенным placeholder) ====================
 @Composable
 private fun InputPanel(
     modifier: Modifier = Modifier,
@@ -693,7 +703,8 @@ private fun InputPanel(
     onVoiceLongClick: () -> Unit,
     voiceInputViewModel: VoiceInputViewModel,
     isVoiceModeActive: Boolean,
-    isMicrophoneBlocked: Boolean
+    isMicrophoneBlocked: Boolean,
+    isVoiceEnabled: Boolean // добавлено для контекстного placeholder
 ) {
     val recognizedText by voiceInputViewModel.recognizedText.collectAsState()
 
@@ -723,17 +734,47 @@ private fun InputPanel(
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            VoiceRecordingButton(
-                isRecording = isRecording,
-                isProcessing = isProcessing,
-                isListening = isListening,
-                audioLevel = audioLevel,
-                onClick = onVoiceClick,
-                onLongClick = onVoiceLongClick,
-                modifier = Modifier.size(48.dp),
-                isVoiceModeActive = isVoiceModeActive,
-                isMicrophoneBlocked = isMicrophoneBlocked
-            )
+            // Пульсирующая обводка вокруг кнопки микрофона в активном режиме
+            Box(contentAlignment = Alignment.Center) {
+                if (isVoiceModeActive && !isMicrophoneBlocked) {
+                    val infiniteTransition = rememberInfiniteTransition()
+                    val scale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 1.2f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1000),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .border(
+                                width = 2.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                    )
+                                ),
+                                shape = CircleShape
+                            )
+                            .scale(scale)
+                    )
+                }
+                VoiceRecordingButton(
+                    isRecording = isRecording,
+                    isProcessing = isProcessing,
+                    isListening = isListening,
+                    audioLevel = audioLevel,
+                    onClick = onVoiceClick,
+                    onLongClick = onVoiceLongClick,
+                    modifier = Modifier.size(56.dp),
+                    isVoiceModeActive = isVoiceModeActive,
+                    isMicrophoneBlocked = isMicrophoneBlocked
+                )
+            }
 
             Spacer(modifier = Modifier.width(8.dp))
 
@@ -836,7 +877,13 @@ private fun InputPanel(
                     modifier = Modifier.weight(1f),
                     placeholder = {
                         Text(
-                            if (isRecording) "🎤 Говорите..." else "Введите вопрос...",
+                            when {
+                                isRecording -> "🎤 Говорите..."
+                                isListening -> "🎤 Слушаю..."
+                                isLoading || isProcessing -> "🤖 Ожидайте ответ..."
+                                isVoiceModeActive && isVoiceEnabled -> "🎤 Нажмите и говорите"
+                                else -> "Введите вопрос..."
+                            },
                             style = MaterialTheme.typography.bodyMedium
                         )
                     },
@@ -912,7 +959,7 @@ private fun VoiceRecordingButton(
             .background(
                 when {
                     isProcessing -> MaterialTheme.colorScheme.tertiaryContainer
-                    isMicrophoneBlocked -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) // Заблокирован - серый
+                    isMicrophoneBlocked -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
                     isListening || isVoiceModeActive ->
                         if (isVoiceModeActive)
                             MaterialTheme.colorScheme.primaryContainer
@@ -939,7 +986,7 @@ private fun VoiceRecordingButton(
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
-                enabled = !isProcessing && !isMicrophoneBlocked // Отключаем клики при блокировке
+                enabled = !isProcessing && !isMicrophoneBlocked
             ),
         contentAlignment = Alignment.Center
     ) {

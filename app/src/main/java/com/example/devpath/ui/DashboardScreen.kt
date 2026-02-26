@@ -566,7 +566,7 @@ fun DashboardScreen(
                         }
                     )
                     ThemeOption(
-                        title = "Тёмная",
+                        title = "Тёммммммммммная",
                         selected = currentTheme == AppTheme.DARK,
                         icon = Icons.Default.DarkMode,
                         onClick = {

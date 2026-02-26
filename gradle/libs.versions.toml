@@ -1,6 +1,6 @@
 # gradle/libs.versions.toml
 [versions]
-agp = "8.3.1"
+agp = "8.5.0"
 kotlin = "1.9.24"
 kotlin-serialization = "1.6.0"
 gson = "2.10.1"
