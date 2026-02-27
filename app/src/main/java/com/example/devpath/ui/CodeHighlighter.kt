@@ -1,6 +1,8 @@
 package com.example.devpath.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -22,6 +24,7 @@ fun CodeBlock(
         color = Color(0xFF1E1E1E), // Темный фон как в Android Studio
         tonalElevation = 2.dp
     ) {
+        // Убираем verticalScroll - прокрутка будет на уровне родителя
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -57,10 +60,48 @@ fun CodeBlock(
     }
 }
 
-// Удаляем verticalScroll из CodeBlock
+@Composable
+private fun ColumnScope.parseCodeBlock(paragraph: String, index: Int) {
+    val codeStart = paragraph.indexOf("```kotlin")
+    val codeEnd = paragraph.lastIndexOf("```")
 
-// Добавьте эти улучшения в highlightKotlinSyntax функцию:
+    // Проверяем, есть ли полный блок кода
+    if (codeStart != -1 && codeEnd != -1 && codeStart < codeEnd) {
+        val code = paragraph
+            .substring(codeStart + 9, codeEnd)
+            .trimIndent()
+
+        CodeBlock(
+            code = code,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 300.dp) // Ограничиваем высоту в теории
+        )
+
+        // Проверяем, есть ли текст после блока кода
+        val textAfterCode = paragraph.substring(codeEnd + 3).trim()
+        if (textAfterCode.isNotEmpty()) {
+            Text(
+                text = textAfterCode,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 24.sp
+            )
+        }
+    } else {
+        // Если блок кода неполный, показываем как есть
+        Text(
+            text = paragraph,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            lineHeight = 24.sp
+        )
+    }
+}
+
+// Остальные функции остаются без изменений
 fun highlightKotlinSyntax(line: String): AnnotatedString {
+    // ... (ваша реализация без изменений)
     return buildAnnotatedString {
         // Разделяем строку на токены, сохраняя пробелы и другие символы
         val pattern = Regex("""(\s+|//.*|".*?"|'.'|\b\w+\b|[^\w\s])""")
@@ -136,6 +177,7 @@ fun FormattedLessonContent(
     content: String,
     modifier: Modifier = Modifier
 ) {
+    // ... (ваша реализация без изменений)
     // Разделяем на абзацы, но сохраняем пустые строки как разделители
     val paragraphs = content.split("\n\n")
 
@@ -156,6 +198,7 @@ fun FormattedLessonContent(
 
 @Composable
 private fun ColumnScope.parseParagraph(paragraph: String, index: Int) {
+    // ... (ваша реализация без изменений)
     val lines = paragraph.lines()
 
     when {
@@ -230,7 +273,7 @@ private fun ColumnScope.parseParagraph(paragraph: String, index: Int) {
             }
         }
 
-        // Блоки кода - новая безопасная реализация
+        // Блоки кода - используем обновленную функцию parseCodeBlock
         paragraph.contains("```") -> {
             parseCodeBlock(paragraph, index)
         }
@@ -258,46 +301,8 @@ private fun ColumnScope.parseParagraph(paragraph: String, index: Int) {
 }
 
 @Composable
-private fun ColumnScope.parseCodeBlock(paragraph: String, index: Int) {
-    val codeStart = paragraph.indexOf("```kotlin")
-    val codeEnd = paragraph.lastIndexOf("```")
-
-    // Проверяем, есть ли полный блок кода
-    if (codeStart != -1 && codeEnd != -1 && codeStart < codeEnd) {
-        val code = paragraph
-            .substring(codeStart + 9, codeEnd)
-            .trimIndent()
-
-        CodeBlock(
-            code = code,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 100.dp, max = 400.dp) // Ограничиваем высоту
-        )
-
-        // Проверяем, есть ли текст после блока кода
-        val textAfterCode = paragraph.substring(codeEnd + 3).trim()
-        if (textAfterCode.isNotEmpty()) {
-            Text(
-                text = textAfterCode,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                lineHeight = 24.sp
-            )
-        }
-    } else {
-        // Если блок кода неполный, показываем как есть
-        Text(
-            text = paragraph,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            lineHeight = 24.sp
-        )
-    }
-}
-
-@Composable
 private fun ColumnScope.parseList(paragraph: String) {
+    // ... (ваша реализация без изменений)
     Column(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -358,6 +363,7 @@ private fun ColumnScope.parseList(paragraph: String) {
 
 @Composable
 private fun ColumnScope.parseBoldText(paragraph: String) {
+    // ... (ваша реализация без изменений)
     Text(
         text = buildAnnotatedString {
             var remainingText = paragraph

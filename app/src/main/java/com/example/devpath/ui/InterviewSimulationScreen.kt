@@ -1,6 +1,5 @@
 // ui/InterviewSimulationScreen.kt
 package com.example.devpath.ui
-
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -38,7 +37,6 @@ import com.example.devpath.ui.viewmodel.VoiceOutputViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.*
-
 // Импортируем ResumeData из другого файла
 import com.example.devpath.ui.ResumeData
 
@@ -59,22 +57,18 @@ fun InterviewSimulationScreen(
     var timeRemaining by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     val isTimerRunning = remember { mutableStateOf(true) }
-
     // Для голосового ввода
     val recognizedText by voiceInputViewModel.recognizedText.collectAsState()
     val isProcessing by voiceInputViewModel.isProcessing.collectAsState()
     val audioLevel by voiceInputViewModel.audioLevel.collectAsState()
-
     // Для скролла
     val scrollState = rememberScrollState()
     val focusManager = LocalFocusManager.current
     val configuration = LocalConfiguration.current
-
     val answers by viewModel.answers.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val analysisResult by viewModel.analysisResult.collectAsState()
-
     val interviewSteps = listOf(
         EnhancedInterviewStep(
             id = 1,
@@ -158,7 +152,6 @@ fun InterviewSimulationScreen(
             )
         )
     )
-
     // Инициализируем таймер при смене шага
     LaunchedEffect(currentStep) {
         userAnswer = answers[currentStep] ?: ""
@@ -166,7 +159,6 @@ fun InterviewSimulationScreen(
         isTimerRunning.value = true
         scrollState.scrollTo(0)
     }
-
     // Таймер обратного отсчёта для каждого вопроса
     LaunchedEffect(currentStep, isTimerRunning.value) {
         if (isTimerRunning.value && !interviewCompleted) {
@@ -189,13 +181,11 @@ fun InterviewSimulationScreen(
             }
         }
     }
-
     // Обработка распознанного текста
     LaunchedEffect(recognizedText) {
         if (recognizedText.isNotBlank()) {
             userAnswer = recognizedText
             voiceInputViewModel.clearRecognizedText()
-
             // Автоскролл к полю ввода
             coroutineScope.launch {
                 delay(100)
@@ -203,17 +193,14 @@ fun InterviewSimulationScreen(
             }
         }
     }
-
     LaunchedEffect(Unit) {
         viewModel.loadAnswers()
     }
-
     error?.let { errorMessage ->
         LaunchedEffect(errorMessage) {
             println("Interview error: $errorMessage")
         }
     }
-
     if (showAnalysisDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -291,12 +278,10 @@ fun InterviewSimulationScreen(
             shape = RoundedCornerShape(20.dp)
         )
     }
-
     // Анимированный фон
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
     val tertiaryColor = MaterialTheme.colorScheme.tertiary
-
     val infiniteTransition = rememberInfiniteTransition()
     val gradientOffset by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -306,7 +291,6 @@ fun InterviewSimulationScreen(
             repeatMode = RepeatMode.Restart
         )
     )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -325,109 +309,117 @@ fun InterviewSimulationScreen(
                 drawRect(brush = brush)
             }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding()
-        ) {
-            TopBarWithProgress(
-                currentStep = currentStep,
-                totalSteps = interviewSteps.size,
-                timeRemaining = timeRemaining,
-                timeLimit = interviewSteps[currentStep].timeLimit,
-                onBackClick = {
-                    focusManager.clearFocus()
-                    navController.popBackStack()
-                }
-            )
-
-            if (!interviewCompleted) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .verticalScroll(scrollState)
-                        .padding(horizontal = 16.dp)
-                ) {
-                    EnhancedInterviewStepContent(
-                        step = interviewSteps[currentStep],
-                        userAnswer = userAnswer,
-                        onAnswerChange = { userAnswer = it },
-                        isRecording = isRecording,
-                        isProcessing = isProcessing,
-                        audioLevel = audioLevel,
-                        onRecordingClick = {
-                            if (isRecording) {
-                                voiceInputViewModel.stopRecordingAndRecognize()
-                            } else {
-                                voiceInputViewModel.startRecording()
-                            }
-                            isRecording = !isRecording
-                        },
-                        answersCount = answers.size,
-                        totalSteps = interviewSteps.size,
-                        interviewerAvatar = getInterviewerAvatar(currentStep)
-                    )
-
-                    Spacer(modifier = Modifier.height(80.dp))
-                }
-
-                // Нижняя панель навигации (только кнопки "Назад" и "Далее/Завершить")
-                BottomNavigationPanel(
+        // Используем Scaffold как в DashboardScreen для корректной обработки отступов
+        Scaffold(
+            topBar = {
+                TopBarWithProgress(
                     currentStep = currentStep,
                     totalSteps = interviewSteps.size,
-                    onPrevious = {
+                    timeRemaining = timeRemaining,
+                    timeLimit = interviewSteps[currentStep].timeLimit,
+                    onBackClick = {
                         focusManager.clearFocus()
-                        if (currentStep > 0) {
+                        navController.popBackStack()
+                    }
+                )
+            },
+            bottomBar = {
+                if (!interviewCompleted) {
+                    BottomNavigationPanel(
+                        currentStep = currentStep,
+                        totalSteps = interviewSteps.size,
+                        onPrevious = {
+                            focusManager.clearFocus()
+                            if (currentStep > 0) {
+                                if (userAnswer.isNotBlank()) {
+                                    viewModel.saveAnswer(currentStep, userAnswer)
+                                }
+                                currentStep--
+                                userAnswer = answers[currentStep] ?: ""
+                            }
+                        },
+                        onNext = {
+                            focusManager.clearFocus()
                             if (userAnswer.isNotBlank()) {
                                 viewModel.saveAnswer(currentStep, userAnswer)
                             }
-                            currentStep--
-                            userAnswer = answers[currentStep] ?: ""
-                        }
-                    },
-                    onNext = {
-                        focusManager.clearFocus()
-                        if (userAnswer.isNotBlank()) {
-                            viewModel.saveAnswer(currentStep, userAnswer)
-                        }
-                        if (currentStep < interviewSteps.size - 1) {
-                            currentStep++
-                            userAnswer = answers[currentStep] ?: ""
-                        } else {
-                            interviewCompleted = true
-                        }
-                    },
-                    isLoading = isLoading
-                )
-            } else {
-                EnhancedInterviewCompletedContent(
-                    answers = answers,
-                    interviewSteps = interviewSteps,
-                    resumeData = resumeData,
-                    onRestart = {
-                        focusManager.clearFocus()
-                        currentStep = 0
-                        userAnswer = ""
-                        viewModel.clearAnswers()
-                        viewModel.clearAnalysis()
-                        interviewCompleted = false
-                    },
-                    onAnalyze = {
-                        focusManager.clearFocus()
-                        viewModel.analyzeFullInterview(
-                            interviewSteps = interviewSteps,
-                            answers = answers,
-                            resumeData = resumeData
+                            if (currentStep < interviewSteps.size - 1) {
+                                currentStep++
+                                userAnswer = answers[currentStep] ?: ""
+                            } else {
+                                interviewCompleted = true
+                            }
+                        },
+                        isLoading = isLoading
+                    )
+                }
+            },
+            containerColor = Color.Transparent
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .imePadding()
+            ) {
+                if (!interviewCompleted) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .verticalScroll(scrollState)
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        EnhancedInterviewStepContent(
+                            step = interviewSteps[currentStep],
+                            userAnswer = userAnswer,
+                            onAnswerChange = { userAnswer = it },
+                            isRecording = isRecording,
+                            isProcessing = isProcessing,
+                            audioLevel = audioLevel,
+                            onRecordingClick = {
+                                if (isRecording) {
+                                    voiceInputViewModel.stopRecordingAndRecognize()
+                                } else {
+                                    voiceInputViewModel.startRecording()
+                                }
+                                isRecording = !isRecording
+                            },
+                            answersCount = answers.size,
+                            totalSteps = interviewSteps.size,
+                            interviewerAvatar = getInterviewerAvatar(currentStep)
                         )
-                        showAnalysisDialog = true
-                    },
-                    onBackToMain = {
-                        focusManager.clearFocus()
-                        navController.popBackStack()
-                    },
-                    isLoading = isLoading
-                )
+                        // Убрали Spacer(modifier = Modifier.height(80.dp)) чтобы убрать отступ над навигацией
+                    }
+                } else {
+                    EnhancedInterviewCompletedContent(
+                        answers = answers,
+                        interviewSteps = interviewSteps,
+                        resumeData = resumeData,
+                        onRestart = {
+                            focusManager.clearFocus()
+                            currentStep = 0
+                            userAnswer = ""
+                            viewModel.clearAnswers()
+                            viewModel.clearAnalysis()
+                            interviewCompleted = false
+                        },
+                        onAnalyze = {
+                            focusManager.clearFocus()
+                            viewModel.analyzeFullInterview(
+                                interviewSteps = interviewSteps,
+                                answers = answers,
+                                resumeData = resumeData
+                            )
+                            showAnalysisDialog = true
+                        },
+                        onBackToMain = {
+                            focusManager.clearFocus()
+                            navController.popBackStack()
+                        },
+                        isLoading = isLoading
+                    )
+                }
             }
         }
     }
@@ -443,11 +435,10 @@ private fun TopBarWithProgress(
 ) {
     val progress = (currentStep + 1f) / totalSteps
     val timeProgress = timeRemaining.toFloat() / timeLimit.toFloat()
-
     Surface(
         modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding(),
+            .fillMaxWidth(),
+        // Убрали .statusBarsPadding() так как Scaffold обрабатывает отступы
         color = Color.Transparent,
         tonalElevation = 0.dp
     ) {
@@ -465,16 +456,13 @@ private fun TopBarWithProgress(
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
-
                 Text(
                     "Вопрос ${currentStep + 1}/$totalSteps",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(start = 4.dp)
                 )
-
                 Spacer(modifier = Modifier.weight(1f))
-
                 // Индикатор времени
                 Surface(
                     shape = RoundedCornerShape(16.dp),
@@ -509,7 +497,6 @@ private fun TopBarWithProgress(
                 }
                 Spacer(modifier = Modifier.width(16.dp))
             }
-
             // Прогресс-бар вопросов
             LinearProgressIndicator(
                 progress = { progress },
@@ -539,18 +526,14 @@ private fun EnhancedInterviewStepContent(
 ) {
     val configuration = LocalConfiguration.current
     val screenHeight = configuration.screenHeightDp.dp
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize()
     ) {
         Spacer(modifier = Modifier.height(16.dp))
-
         InterviewerAvatarView(avatar = interviewerAvatar)
-
         Spacer(modifier = Modifier.height(12.dp))
-
         // Категория и сложность
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -568,7 +551,6 @@ private fun EnhancedInterviewStepContent(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
-
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "Сложность:",
@@ -586,9 +568,7 @@ private fun EnhancedInterviewStepContent(
                 }
             }
         }
-
         Spacer(modifier = Modifier.height(8.dp))
-
         // Статус ответов
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -600,14 +580,10 @@ private fun EnhancedInterviewStepContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-
         Spacer(modifier = Modifier.height(12.dp))
-
         // Карточка вопроса с эффектом печатной машинки
         TypewriterQuestionCard(step = step)
-
         Spacer(modifier = Modifier.height(16.dp))
-
         // Поле ввода ответа
         OutlinedTextField(
             value = userAnswer,
@@ -633,9 +609,7 @@ private fun EnhancedInterviewStepContent(
             ),
             enabled = !isProcessing
         )
-
         Spacer(modifier = Modifier.height(8.dp))
-
         // Кнопка голосового ответа
         VoiceRecordingButton(
             isRecording = isRecording,
@@ -643,9 +617,7 @@ private fun EnhancedInterviewStepContent(
             audioLevel = audioLevel,
             onClick = onRecordingClick
         )
-
         Spacer(modifier = Modifier.height(24.dp))
-
         // Советы
         TipsCard(tips = step.tips)
     }
@@ -667,7 +639,6 @@ private fun VoiceRecordingButton(
             repeatMode = RepeatMode.Reverse
         )
     )
-
     Button(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -709,7 +680,6 @@ private fun VoiceRecordingButton(
 @Composable
 private fun TypewriterQuestionCard(step: EnhancedInterviewStep) {
     var displayedText by remember { mutableStateOf("") }
-
     LaunchedEffect(step.id) {
         displayedText = ""
         val chars = step.question.toCharArray()
@@ -718,7 +688,6 @@ private fun TypewriterQuestionCard(step: EnhancedInterviewStep) {
             displayedText += chars[i]
         }
     }
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -768,7 +737,6 @@ private fun TypewriterQuestionCard(step: EnhancedInterviewStep) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
             Text(
                 text = displayedText,
                 style = MaterialTheme.typography.bodyLarge,
@@ -790,7 +758,6 @@ private fun InterviewerAvatarView(avatar: InterviewerAvatar) {
             repeatMode = RepeatMode.Reverse
         )
     )
-
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -917,8 +884,8 @@ private fun BottomNavigationPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .navigationBarsPadding(),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            // Убрали .navigationBarsPadding() так как Scaffold обрабатывает отступы
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -941,7 +908,6 @@ private fun BottomNavigationPanel(
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Назад")
             }
-
             // Кнопка далее/завершить
             Button(
                 onClick = onNext,
@@ -993,7 +959,6 @@ private fun EnhancedInterviewCompletedContent(
     val averageDifficulty = if (interviewSteps.isNotEmpty()) {
         interviewSteps.sumOf { it.difficulty } / interviewSteps.size
     } else 0
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1007,7 +972,6 @@ private fun EnhancedInterviewCompletedContent(
             delay(200)
             scale = 1f
         }
-
         Icon(
             Icons.Default.CheckCircle,
             contentDescription = "Завершено",
@@ -1017,7 +981,6 @@ private fun EnhancedInterviewCompletedContent(
                 .scale(scale)
         )
         Spacer(modifier = Modifier.height(24.dp))
-
         Text(
             "Собеседование завершено!",
             style = MaterialTheme.typography.headlineMedium,
@@ -1025,7 +988,6 @@ private fun EnhancedInterviewCompletedContent(
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(8.dp))
-
         // Информация из резюме
         if (resumeData?.hasData() == true) {
             Surface(
@@ -1064,7 +1026,6 @@ private fun EnhancedInterviewCompletedContent(
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
-
         // Статистика
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -1096,9 +1057,7 @@ private fun EnhancedInterviewCompletedContent(
                 )
             }
         }
-
         Spacer(modifier = Modifier.height(24.dp))
-
         // Детали по вопросам
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -1119,7 +1078,6 @@ private fun EnhancedInterviewCompletedContent(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
                 interviewSteps.forEachIndexed { index, step ->
                     val answer = answers[index]
                     val isAnswered = answer != null && answer.isNotBlank()
@@ -1131,9 +1089,7 @@ private fun EnhancedInterviewCompletedContent(
                 }
             }
         }
-
         Spacer(modifier = Modifier.height(32.dp))
-
         // Кнопки действий
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -1165,7 +1121,6 @@ private fun EnhancedInterviewCompletedContent(
                     Text("Получить анализ от GigaChat")
                 }
             }
-
             OutlinedButton(
                 onClick = onRestart,
                 modifier = Modifier.fillMaxWidth(),
@@ -1179,7 +1134,6 @@ private fun EnhancedInterviewCompletedContent(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Пройти заново")
             }
-
             TextButton(
                 onClick = onBackToMain,
                 modifier = Modifier.fillMaxWidth()
@@ -1187,7 +1141,6 @@ private fun EnhancedInterviewCompletedContent(
                 Text("Вернуться на главную")
             }
         }
-
         Spacer(modifier = Modifier.height(40.dp))
     }
 }
@@ -1257,9 +1210,7 @@ private fun AnswerSummaryItem(
                         }
                     )
             )
-
             Spacer(modifier = Modifier.width(12.dp))
-
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     "Вопрос ${step.id}: ${step.title}",
@@ -1272,7 +1223,6 @@ private fun AnswerSummaryItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
             Column(horizontalAlignment = Alignment.End) {
                 Icon(
                     if (isAnswered) Icons.Default.CheckCircle else Icons.Default.Info,
@@ -1305,9 +1255,7 @@ private fun AnalysisResultContent(analysisResult: String?) {
         )
         return
     }
-
-    val sections = analysisResult.split("\n\n")
-
+    val sections = analysisResult.split("\n")
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {

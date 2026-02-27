@@ -2,13 +2,16 @@ package com.example.devpath.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -19,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -38,6 +42,10 @@ import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
+
+// Импортируем ваши компоненты
+import com.example.devpath.ui.CodeBlock
+import com.example.devpath.ui.FormattedLessonContent
 
 @OptIn(
     ExperimentalMaterial3Api::class,
@@ -106,32 +114,6 @@ fun LessonScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        lessonTitle,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.Default.ArrowBack,
-                            contentDescription = "Назад",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
-                )
-            )
-        },
         floatingActionButton = {
             AnimatedVisibility(
                 visible = true,
@@ -147,7 +129,7 @@ fun LessonScreen(
                                     progressRepo.markLessonCompleted(currentUser.uid, lessonId)
                                     isMarkedAsCompleted = true
                                     snackbarHostState.showSnackbar(
-                                        message = "Урок отмечен как пройденный!",
+                                        message = "🎉 Урок отмечен как пройденный!",
                                         duration = SnackbarDuration.Short
                                     )
                                 } catch (e: Exception) {
@@ -204,24 +186,22 @@ fun LessonScreen(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = paddingValues.calculateTopPadding() + 8.dp,
+                    top = paddingValues.calculateTopPadding() + 16.dp,
                     bottom = 100.dp
                 )
             ) {
                 item {
                     LessonHeader(
                         lesson = lesson,
-                        isCompleted = isMarkedAsCompleted
+                        isCompleted = isMarkedAsCompleted,
+                        onBack = onBack
                     )
                 }
-
                 item {
                     LessonTheoryContent(
-                        lessonContent = lessonContent,
-                        listState = listState
+                        lessonContent = lessonContent
                     )
                 }
-
                 if (lesson.codeExample.isNotBlank()) {
                     item {
                         LessonCodeExample(
@@ -230,7 +210,7 @@ fun LessonScreen(
                                 clipboardManager.setText(AnnotatedString(lesson.codeExample))
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar(
-                                        message = "Код скопирован!",
+                                        message = "📋 Код скопирован!",
                                         duration = SnackbarDuration.Short
                                     )
                                 }
@@ -239,11 +219,9 @@ fun LessonScreen(
                         )
                     }
                 }
-
                 item {
                     LessonTips()
                 }
-
                 if (practiceTasks.isNotEmpty() || quizQuestions.isNotEmpty()) {
                     item {
                         SequentialLearningPath(
@@ -256,17 +234,25 @@ fun LessonScreen(
                         )
                     }
                 }
-
                 item { Spacer(modifier = Modifier.height(32.dp)) }
             }
 
+            // ✅ УЛУЧШЕННЫЙ индикатор прогресса чтения
+            ReadingProgressIndicator(
+                listState = listState,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = paddingValues.calculateTopPadding() + 16.dp, end = 16.dp)
+            )
+
+            // Кнопка "Наверх"
             AnimatedVisibility(
                 visible = showScrollToTop,
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 120.dp, end = 16.dp)
+                    .padding(bottom = 160.dp, end = 16.dp)
             ) {
                 FloatingActionButton(
                     onClick = {
@@ -282,6 +268,7 @@ fun LessonScreen(
                 }
             }
 
+            // Полноэкранный режим для кода
             if (isCodeFullScreen) {
                 FullScreenCodeDialog(
                     code = lesson.codeExample,
@@ -290,7 +277,7 @@ fun LessonScreen(
                         clipboardManager.setText(AnnotatedString(lesson.codeExample))
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
-                                message = "Код скопирован!",
+                                message = "📋 Код скопирован!",
                                 duration = SnackbarDuration.Short
                             )
                         }
@@ -298,6 +285,127 @@ fun LessonScreen(
                 )
             }
         }
+    }
+}
+
+
+// ==================== ЧЕСТНЫЙ ReadingProgressIndicator ====================
+// ==================== ИСПРАВЛЕННЫЙ ReadingProgressIndicator ====================
+@Composable
+fun ReadingProgressIndicator(
+    listState: LazyListState,
+    modifier: Modifier = Modifier
+) {
+    // 1. Кэш реальных высот элементов (ключ = индекс, значение = высота в px)
+    // mutableStateMapOf автоматически отслеживает изменения
+    val itemHeights = remember { mutableStateMapOf<Int, Int>() }
+
+    // 2. Обновляем кэш высот, когда меняется видимая область
+    LaunchedEffect(listState.layoutInfo) {
+        val visibleItems = listState.layoutInfo.visibleItemsInfo
+        visibleItems.forEach { item ->
+            if (!itemHeights.containsKey(item.index)) {
+                itemHeights[item.index] = item.size
+            }
+        }
+    }
+
+    // 3. ✅ ИСПРАВЛЕНО: derivedStateOf ОБЯЗАТЕЛЬНО в remember
+    val progress by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val viewportHeight = layoutInfo.viewportSize.height
+            val totalItemsCount = layoutInfo.totalItemsCount
+            val visibleItemsInfo = layoutInfo.visibleItemsInfo
+
+            if (totalItemsCount == 0 || visibleItemsInfo.isEmpty()) return@derivedStateOf 0f
+
+            val firstVisibleItem = visibleItemsInfo.first()
+            val firstVisibleIndex = firstVisibleItem.index
+            val firstVisibleOffset = firstVisibleItem.offset.toFloat()
+
+            // --- А. Считаем точную высоту проскролленного контента ---
+            // Суммируем РЕАЛЬНЫЕ высоты всех элементов, которые ушли за верхнюю границу
+            val scrolledKnownHeight = itemHeights
+                .filterKeys { it < firstVisibleIndex }
+                .values
+                .sum()
+
+            // Добавляем часть текущего видимого элемента
+            val currentVisiblePart = (-firstVisibleOffset).coerceAtLeast(0f)
+
+            val totalScrolledHeight = scrolledKnownHeight + currentVisiblePart
+
+            // --- Б. Оцениваем общую высоту контента ---
+            val knownHeightSum = itemHeights.values.sum()
+            val knownItemsCount = itemHeights.size
+
+            // Средняя высота только на основе ИЗВЕСТНЫХ элементов
+            val averageKnownHeight = if (knownItemsCount > 0) {
+                knownHeightSum.toFloat() / knownItemsCount
+            } else {
+                500f // Дефолтное значение, пока ничего не загружено
+            }
+
+            val remainingItemsCount = (totalItemsCount - knownItemsCount).coerceAtLeast(0)
+            val estimatedRemainingHeight = remainingItemsCount * averageKnownHeight
+
+            val estimatedTotalHeight = knownHeightSum + estimatedRemainingHeight
+
+            // --- В. Финальный расчет ---
+            val maxScroll = (estimatedTotalHeight - viewportHeight).coerceAtLeast(1f)
+
+            (totalScrolledHeight / maxScroll).coerceIn(0f, 1f)
+        }
+    }
+
+    // Анимация для плавности
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 100, easing = LinearEasing),
+        label = "progress_animation"
+    )
+
+    val percentage = (animatedProgress * 100).toInt().coerceIn(0, 100)
+
+    // Динамический цвет
+    val progressColor = when {
+        percentage < 25 -> MaterialTheme.colorScheme.primary
+        percentage < 50 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+        percentage < 75 -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.tertiary
+    }
+
+    // Скрываем, если контента нет
+    if (listState.layoutInfo.totalItemsCount == 0) return
+
+    Box(
+        modifier = modifier
+            .padding(8.dp)
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(
+                MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                CircleShape
+            )
+            .shadow(16.dp, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier.size(46.dp),
+            strokeWidth = 3.5.dp,
+            color = progressColor,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+        Text(
+            text = "$percentage%",
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }
 
@@ -334,28 +442,36 @@ fun FullScreenCodeDialog(
                     Text(
                         "Полный код",
                         style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Row {
                         IconButton(onClick = onCopy) {
-                            Icon(Icons.Outlined.ContentCopy, contentDescription = "Копировать")
+                            Icon(
+                                Icons.Outlined.ContentCopy,
+                                contentDescription = "Копировать",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
                         }
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Закрыть")
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
                         }
                     }
                 }
-
                 Divider()
-
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
                         .padding(16.dp)
                 ) {
                     CodeBlock(
                         code = code,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -363,100 +479,128 @@ fun FullScreenCodeDialog(
     }
 }
 
+// ==================== LessonHeader ====================
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun LessonHeader(
     lesson: com.example.devpath.domain.models.Lesson,
     isCompleted: Boolean,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val backgroundColor by animateColorAsState(
         targetValue = if (isCompleted)
             MaterialTheme.colorScheme.secondaryContainer
         else
-            MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
+            MaterialTheme.colorScheme.primaryContainer,
         label = "header_color_animation",
         animationSpec = tween(durationMillis = 300)
     )
+
+    val contentColor = if (isCompleted)
+        MaterialTheme.colorScheme.onSecondaryContainer
+    else
+        MaterialTheme.colorScheme.onPrimaryContainer
 
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = backgroundColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
-                        )
-                    )
-                )
                 .padding(24.dp)
         ) {
+            // Верхняя строка: кнопка назад
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(contentColor.copy(alpha = 0.15f))
+                ) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Назад",
+                        tint = contentColor,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Основная информация об уроке
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(20.dp)
             ) {
+                // Иконка урока
                 Box(
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(72.dp)
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
                                     MaterialTheme.colorScheme.primary,
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                 )
                             )
-                        ),
+                        )
+                        .shadow(6.dp, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         if (isCompleted) Icons.Rounded.DoneAll else Icons.Rounded.MenuBook,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
+                        tint = Color.White,
                         modifier = Modifier.size(36.dp)
                     )
                 }
-
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        "Урок",
+                        "📘 Урок",
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = contentColor.copy(alpha = 0.85f),
+                        fontWeight = FontWeight.Medium
                     )
                     Text(
                         lesson.title,
-                        style = MaterialTheme.typography.headlineSmall.copy(
+                        style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.ExtraBold
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 24.sp
                     )
                     Text(
                         lesson.description,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 20.sp
                     )
                 }
             }
+            Spacer(modifier = Modifier.height(20.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
+            // Чипсы с информацией
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val difficultyColor = when (lesson.difficulty) {
                     "beginner" -> MaterialTheme.colorScheme.tertiary
@@ -465,101 +609,100 @@ fun LessonHeader(
                     else -> MaterialTheme.colorScheme.primary
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = difficultyColor.copy(alpha = 0.15f),
-                    tonalElevation = 2.dp
+                @Composable
+                fun InfoChip(
+                    text: String,
+                    icon: androidx.compose.ui.graphics.vector.ImageVector,
+                    chipColor: Color
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Star,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = difficultyColor
-                        )
-                        Text(
-                            text = when (lesson.difficulty) {
-                                "beginner" -> "Начальный"
-                                "intermediate" -> "Средний"
-                                "advanced" -> "Продвинутый"
-                                else -> "Начальный"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = difficultyColor
-                        )
-                    }
+                    AssistChip(
+                        onClick = {},
+                        label = {
+                            Text(
+                                text = text,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Medium
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = Color.Transparent,
+                            labelColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        border = AssistChipDefaults.assistChipBorder(
+                            enabled = true,
+                            borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                            borderWidth = 1.dp
+                        ),
+                        modifier = Modifier.heightIn(min = 36.dp)
+                    )
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Schedule,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "${lesson.duration} мин",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
+                InfoChip(
+                    text = when (lesson.difficulty) {
+                        "beginner" -> "🌱 Начальный"
+                        "intermediate" -> "📊 Средний"
+                        "advanced" -> "🔥 Продвинутый"
+                        else -> "🌱 Начальный"
+                    },
+                    icon = Icons.Outlined.Star,
+                    chipColor = difficultyColor
+                )
 
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            Icons.Outlined.Folder,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.tertiary
-                        )
-                        Text(
-                            text = lesson.topic.replace("_", " ").replaceFirstChar { it.uppercase() },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.tertiary
-                        )
-                    }
-                }
+                InfoChip(
+                    text = "${lesson.duration} мин",
+                    icon = Icons.Outlined.Schedule,
+                    chipColor = MaterialTheme.colorScheme.primary
+                )
+
+                InfoChip(
+                    text = lesson.topic.replace("_", " ").replaceFirstChar { it.uppercase() },
+                    icon = Icons.Outlined.Folder,
+                    chipColor = MaterialTheme.colorScheme.tertiary
+                )
             }
 
+            // Статус прохождения - ТОЛЬКО ОДИН, внизу карточки
             AnimatedVisibility(visible = isCompleted) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 16.dp),
+                        .padding(top = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        Icons.Default.Verified,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        "Урок успешно пройден",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Verified,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                "Урок успешно пройден",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = Color.White
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -569,27 +712,15 @@ fun LessonHeader(
 @Composable
 fun LessonTheoryContent(
     lessonContent: String,
-    listState: LazyListState,
     modifier: Modifier = Modifier
 ) {
-    val progress by remember {
-        derivedStateOf {
-            if (listState.layoutInfo.totalItemsCount == 0) 0f
-            else {
-                val firstVisible = listState.firstVisibleItemIndex
-                val offset = listState.firstVisibleItemScrollOffset
-                (firstVisible + offset / 1000f) / listState.layoutInfo.totalItemsCount
-            }
-        }
-    }
-
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth()
@@ -608,46 +739,28 @@ fun LessonTheoryContent(
                     Icon(
                         Icons.Rounded.MenuBook,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
                     )
                     Text(
                         "Теория",
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Bold
-                        )
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier.size(30.dp),
-                        strokeWidth = 3.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
-
             Divider(
                 modifier = Modifier.padding(horizontal = 20.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )
-
-            // Здесь текст будет синим
             FormattedLessonContent(
                 content = lessonContent,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(20.dp)
             )
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -679,14 +792,13 @@ fun LessonCodeExample(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth()
@@ -705,16 +817,17 @@ fun LessonCodeExample(
                     Icon(
                         Icons.Rounded.Code,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
                     )
                     Text(
                         "Пример кода",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold
-                        )
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
-
                 Row {
                     IconButton(onClick = onCopy) {
                         Icon(
@@ -732,20 +845,27 @@ fun LessonCodeExample(
                     }
                 }
             }
-
             Divider(
                 modifier = Modifier.padding(horizontal = 20.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )
-
-            CodeBlock(
-                code = code,
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 120.dp, max = if (expanded) 400.dp else 200.dp)
+                    .then(
+                        if (expanded) {
+                            Modifier.wrapContentHeight(unbounded = true)
+                        } else {
+                            Modifier.heightIn(min = 120.dp, max = 240.dp)
+                        }
+                    )
                     .animateContentSize()
-            )
-
+            ) {
+                CodeBlock(
+                    code = code,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -756,15 +876,18 @@ fun LessonCodeExample(
                     onClick = { expanded = !expanded },
                     shape = RoundedCornerShape(16.dp)
                 ) {
-                    Text(if (expanded) "Свернуть" else "Развернуть")
+                    Text(
+                        if (expanded) "Свернуть" else "Развернуть код",
+                        color = MaterialTheme.colorScheme.primary
+                    )
                     Icon(
                         if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
-
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -802,7 +925,7 @@ fun LessonTips(modifier: Modifier = Modifier) {
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.tertiaryContainer
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Row(
             modifier = Modifier
@@ -815,7 +938,15 @@ fun LessonTips(modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.tertiary),
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.tertiary,
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
+                            )
+                        )
+                    )
+                    .shadow(4.dp, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -825,7 +956,6 @@ fun LessonTips(modifier: Modifier = Modifier) {
                     modifier = Modifier.size(24.dp)
                 )
             }
-
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -864,7 +994,7 @@ fun SequentialLearningPath(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
             modifier = Modifier
@@ -879,7 +1009,8 @@ fun SequentialLearningPath(
                 Icon(
                     Icons.Rounded.Timeline,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
                 )
                 Text(
                     "Путь обучения",
@@ -889,13 +1020,11 @@ fun SequentialLearningPath(
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
-
             Text(
                 "Закрепите материал на практике:",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -910,7 +1039,6 @@ fun SequentialLearningPath(
                         modifier = Modifier.weight(1f)
                     )
                 }
-
                 if (quizQuestions.isNotEmpty()) {
                     LearningCard(
                         title = "Тесты",
@@ -922,7 +1050,6 @@ fun SequentialLearningPath(
                     )
                 }
             }
-
             OutlinedButton(
                 onClick = onGeneralTestClick,
                 modifier = Modifier.fillMaxWidth(),
@@ -949,7 +1076,7 @@ fun LearningCard(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = color.copy(alpha = 0.1f)
+            containerColor = color.copy(alpha = 0.12f)
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         onClick = onClick
@@ -974,8 +1101,8 @@ fun LearningCard(
             )
             Text(
                 "$count заданий",
-                style = MaterialTheme.typography.labelMedium,
-                color = color.copy(alpha = 0.8f)
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )
         }
     }
@@ -989,12 +1116,9 @@ fun LessonScreenPreview() {
             lessonTitle = "Основы Kotlin",
             lessonContent = """
                 # Основы Kotlin
-                
                 Kotlin — современный язык программирования, разработанный компанией JetBrains.
                 Он полностью совместим с Java и работает на JVM, Android, браузерах и нативных платформах.
-                
                 ## Почему Kotlin?
-                
                 1. **Краткость** — на 40% меньше кода по сравнению с Java
                 2. **Безопасность** — защита от NullPointerException
                 3. **Совместимость** — полная совместимость с Java
