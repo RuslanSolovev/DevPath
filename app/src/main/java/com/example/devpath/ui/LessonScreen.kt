@@ -49,7 +49,8 @@ import com.example.devpath.ui.FormattedLessonContent
 
 @OptIn(
     ExperimentalMaterial3Api::class,
-    ExperimentalAnimationApi::class
+    ExperimentalAnimationApi::class,
+    ExperimentalFoundationApi::class
 )
 @Composable
 fun LessonScreen(
@@ -84,6 +85,7 @@ fun LessonScreen(
     var isMarkedAsCompleted by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var isCodeFullScreen by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(0) } // 0: теория, 1: код, 2: практика
 
     val showScrollToTop by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 }
@@ -197,47 +199,97 @@ fun LessonScreen(
                         onBack = onBack
                     )
                 }
+
+                // Вкладки для навигации по контенту
                 item {
-                    LessonTheoryContent(
-                        lessonContent = lessonContent
-                    )
+                    ScrollableTabRow(
+                        selectedTabIndex = selectedTab,
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        edgePadding = 0.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        listOf("Теория", "Примеры кода", "Практика").forEachIndexed { index, title ->
+                            Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { Text(title, fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal) }
+                            )
+                        }
+                    }
                 }
-                if (lesson.codeExample.isNotBlank()) {
-                    item {
-                        LessonCodeExample(
-                            code = lesson.codeExample,
-                            onCopy = {
-                                clipboardManager.setText(AnnotatedString(lesson.codeExample))
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        message = "📋 Код скопирован!",
-                                        duration = SnackbarDuration.Short
+
+                // Контент в зависимости от выбранной вкладки
+                when (selectedTab) {
+                    0 -> {
+                        item {
+                            LessonTheoryContent(
+                                lessonContent = lessonContent
+                            )
+                        }
+                        // Добавляем секцию с реальными примерами из разработки
+                        item {
+                            RealWorldExamples()
+                        }
+                        // Секция с частыми ошибками
+                        item {
+                            CommonPitfalls()
+                        }
+                    }
+                    1 -> {
+                        if (lesson.codeExample.isNotBlank()) {
+                            item {
+                                LessonCodeExample(
+                                    code = lesson.codeExample,
+                                    onCopy = {
+                                        clipboardManager.setText(AnnotatedString(lesson.codeExample))
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                message = "📋 Код скопирован!",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                        }
+                                    },
+                                    onExpand = { isCodeFullScreen = true }
+                                )
+                            }
+                        }
+                    }
+                    2 -> {
+                        if (practiceTasks.isNotEmpty() || quizQuestions.isNotEmpty()) {
+                            item {
+                                SequentialLearningPath(
+                                    lessonTopic = lesson.topic,
+                                    practiceTasks = practiceTasks,
+                                    quizQuestions = quizQuestions,
+                                    onPracticeClick = onNavigateToPractice,
+                                    onQuizClick = onNavigateToQuiz,
+                                    onGeneralTestClick = onNavigateToGeneralTest
+                                )
+                            }
+                        } else {
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                ) {
+                                    Text(
+                                        "Практические задания по этой теме появятся позже.",
+                                        modifier = Modifier.padding(16.dp),
+                                        style = MaterialTheme.typography.bodyMedium
                                     )
                                 }
-                            },
-                            onExpand = { isCodeFullScreen = true }
-                        )
+                            }
+                        }
                     }
                 }
-                item {
-                    LessonTips()
-                }
-                if (practiceTasks.isNotEmpty() || quizQuestions.isNotEmpty()) {
-                    item {
-                        SequentialLearningPath(
-                            lessonTopic = lesson.topic,
-                            practiceTasks = practiceTasks,
-                            quizQuestions = quizQuestions,
-                            onPracticeClick = onNavigateToPractice,
-                            onQuizClick = onNavigateToQuiz,
-                            onGeneralTestClick = onNavigateToGeneralTest
-                        )
-                    }
-                }
+
                 item { Spacer(modifier = Modifier.height(32.dp)) }
             }
 
-            // ✅ УЛУЧШЕННЫЙ индикатор прогресса чтения
+            // Улучшенный индикатор прогресса чтения
             ReadingProgressIndicator(
                 listState = listState,
                 modifier = Modifier
@@ -288,19 +340,13 @@ fun LessonScreen(
     }
 }
 
-
-// ==================== ЧЕСТНЫЙ ReadingProgressIndicator ====================
-// ==================== ИСПРАВЛЕННЫЙ ReadingProgressIndicator ====================
 @Composable
 fun ReadingProgressIndicator(
     listState: LazyListState,
     modifier: Modifier = Modifier
 ) {
-    // 1. Кэш реальных высот элементов (ключ = индекс, значение = высота в px)
-    // mutableStateMapOf автоматически отслеживает изменения
     val itemHeights = remember { mutableStateMapOf<Int, Int>() }
 
-    // 2. Обновляем кэш высот, когда меняется видимая область
     LaunchedEffect(listState.layoutInfo) {
         val visibleItems = listState.layoutInfo.visibleItemsInfo
         visibleItems.forEach { item ->
@@ -310,7 +356,6 @@ fun ReadingProgressIndicator(
         }
     }
 
-    // 3. ✅ ИСПРАВЛЕНО: derivedStateOf ОБЯЗАТЕЛЬНО в remember
     val progress by remember {
         derivedStateOf {
             val layoutInfo = listState.layoutInfo
@@ -324,42 +369,33 @@ fun ReadingProgressIndicator(
             val firstVisibleIndex = firstVisibleItem.index
             val firstVisibleOffset = firstVisibleItem.offset.toFloat()
 
-            // --- А. Считаем точную высоту проскролленного контента ---
-            // Суммируем РЕАЛЬНЫЕ высоты всех элементов, которые ушли за верхнюю границу
             val scrolledKnownHeight = itemHeights
                 .filterKeys { it < firstVisibleIndex }
                 .values
                 .sum()
 
-            // Добавляем часть текущего видимого элемента
             val currentVisiblePart = (-firstVisibleOffset).coerceAtLeast(0f)
-
             val totalScrolledHeight = scrolledKnownHeight + currentVisiblePart
 
-            // --- Б. Оцениваем общую высоту контента ---
             val knownHeightSum = itemHeights.values.sum()
             val knownItemsCount = itemHeights.size
 
-            // Средняя высота только на основе ИЗВЕСТНЫХ элементов
             val averageKnownHeight = if (knownItemsCount > 0) {
                 knownHeightSum.toFloat() / knownItemsCount
             } else {
-                500f // Дефолтное значение, пока ничего не загружено
+                500f
             }
 
             val remainingItemsCount = (totalItemsCount - knownItemsCount).coerceAtLeast(0)
             val estimatedRemainingHeight = remainingItemsCount * averageKnownHeight
 
             val estimatedTotalHeight = knownHeightSum + estimatedRemainingHeight
-
-            // --- В. Финальный расчет ---
             val maxScroll = (estimatedTotalHeight - viewportHeight).coerceAtLeast(1f)
 
             (totalScrolledHeight / maxScroll).coerceIn(0f, 1f)
         }
     }
 
-    // Анимация для плавности
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = tween(durationMillis = 100, easing = LinearEasing),
@@ -368,7 +404,6 @@ fun ReadingProgressIndicator(
 
     val percentage = (animatedProgress * 100).toInt().coerceIn(0, 100)
 
-    // Динамический цвет
     val progressColor = when {
         percentage < 25 -> MaterialTheme.colorScheme.primary
         percentage < 50 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
@@ -376,7 +411,6 @@ fun ReadingProgressIndicator(
         else -> MaterialTheme.colorScheme.tertiary
     }
 
-    // Скрываем, если контента нет
     if (listState.layoutInfo.totalItemsCount == 0) return
 
     Box(
@@ -513,7 +547,6 @@ fun LessonHeader(
                 .fillMaxWidth()
                 .padding(24.dp)
         ) {
-            // Верхняя строка: кнопка назад
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Start,
@@ -536,12 +569,10 @@ fun LessonHeader(
             }
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Основная информация об уроке
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // Иконка урока
                 Box(
                     modifier = Modifier
                         .size(72.dp)
@@ -596,7 +627,6 @@ fun LessonHeader(
             }
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Чипсы с информацией
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -670,7 +700,6 @@ fun LessonHeader(
                 )
             }
 
-            // Статус прохождения - ТОЛЬКО ОДИН, внизу карточки
             AnimatedVisibility(visible = isCompleted) {
                 Row(
                     modifier = Modifier
@@ -918,7 +947,7 @@ fun LessonCodeExample(
 }
 
 @Composable
-fun LessonTips(modifier: Modifier = Modifier) {
+fun RealWorldExamples(modifier: Modifier = Modifier) {
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -927,53 +956,90 @@ fun LessonTips(modifier: Modifier = Modifier) {
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.tertiary,
-                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
-                            )
-                        )
-                    )
-                    .shadow(4.dp, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Lightbulb,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onTertiary,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Work, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    "Совет",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
+                    "Реальные примеры из разработки",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onTertiaryContainer
                 )
+            }
+            Text(
+                "1. **Android**: безопасное чтение из Bundle: `bundle.getString(\"key\") ?: \"\"`",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                "2. **Retrofit**: использование `@Nullable` и `@NotNull` аннотаций для API-моделей",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                "3. **Room**: обработка nullable полей в базе данных с помощью `@TypeConverters`",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            Text(
+                "4. **Kotlin Coroutines**: безопасная обработка nullable результатов асинхронных вызовов",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+fun CommonPitfalls(modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    "Прочитайте материал внимательно и попробуйте повторить примеры кода. Практика — ключ к успеху!",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    lineHeight = 20.sp
+                    "Частые ошибки и как их избежать",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onErrorContainer
                 )
             }
+            Text(
+                "❌ Использование `!!` без проверки → замените на `?.` или `?:`",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Text(
+                "❌ Игнорирование платформенных типов из Java → всегда явно указывайте тип (String или String?)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Text(
+                "❌ Возврат `null` из функций, когда можно вернуть пустую коллекцию или `Result`",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Text(
+                "✅ Вместо этого используйте `Result.success(emptyList())` или `null` только в особых случаях",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
         }
     }
 }
@@ -1108,23 +1174,3 @@ fun LearningCard(
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun LessonScreenPreview() {
-    MaterialTheme {
-        LessonScreen(
-            lessonTitle = "Основы Kotlin",
-            lessonContent = """
-                # Основы Kotlin
-                Kotlin — современный язык программирования, разработанный компанией JetBrains.
-                Он полностью совместим с Java и работает на JVM, Android, браузерах и нативных платформах.
-                ## Почему Kotlin?
-                1. **Краткость** — на 40% меньше кода по сравнению с Java
-                2. **Безопасность** — защита от NullPointerException
-                3. **Совместимость** — полная совместимость с Java
-            """.trimIndent(),
-            lessonId = "kotlin_basics",
-            onBack = {}
-        )
-    }
-}

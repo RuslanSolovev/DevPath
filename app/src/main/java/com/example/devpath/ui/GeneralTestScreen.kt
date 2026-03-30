@@ -24,8 +24,8 @@ import com.example.devpath.domain.models.TopicResult
 @Composable
 fun GeneralTestScreen(
     questions: List<QuizQuestion>,
-    onTestComplete: (QuizResult) -> Unit,
-    onBack: () -> Unit // Добавлен параметр onBack
+    onTestComplete: (QuizResult, Map<Int, Int>) -> Unit, // Изменен тип: теперь передает и результаты, и ответы
+    onBack: () -> Unit
 ) {
     var currentQuestionIndex by remember { mutableStateOf(0) }
     var answers = remember { mutableStateMapOf<Int, Int>() }
@@ -61,7 +61,7 @@ fun GeneralTestScreen(
         )
 
         LaunchedEffect(Unit) {
-            onTestComplete(result)
+            onTestComplete(result, answers.toMap()) // Передаем и результат, и ответы
         }
         return
     }

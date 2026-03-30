@@ -5,7 +5,8 @@ plugins {
     alias(libs.plugins.kotlin.kapt)
     alias(libs.plugins.google.services)
     alias(libs.plugins.dagger.hilt.android)
-    alias(libs.plugins.kotlin.serialization) // ← ДОБАВИТЬ эту строку!
+    alias(libs.plugins.kotlin.serialization)
+    id("kotlin-parcelize")
 }
 
 android {
@@ -123,9 +124,6 @@ dependencies {
     implementation ("androidx.lifecycle:lifecycle-process:2.7.0")
 
     implementation ("androidx.lifecycle:lifecycle-common:2.7.0")
-
-    // Gson - можно удалить если используете Kotlin Serialization
-    // implementation("com.google.code.gson:gson:2.10.1")
 
     // DataStore для хранения настроек
     implementation(libs.androidx.datastore.preferences)

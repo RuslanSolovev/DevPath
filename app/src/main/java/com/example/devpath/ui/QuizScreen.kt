@@ -26,7 +26,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.data.repository.QuizRepository
 import com.example.devpath.domain.models.GeneralTestResult
 import com.example.devpath.domain.models.QuizQuestion
@@ -36,7 +35,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 import androidx.activity.compose.BackHandler
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 
@@ -48,14 +46,12 @@ fun QuizScreen(
 ) {
     // Добавляем BackHandler для этого экрана
     BackHandler {
-        println("DEBUG: PracticeScreen BackHandler")
+        println("DEBUG: QuizScreen BackHandler")
         onNavigateBack()
     }
 
     val allQuestions = QuizRepository.getQuizQuestions()
     val currentUser = Firebase.auth.currentUser
-
-
 
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
@@ -382,8 +378,9 @@ fun QuizScreen(
                             },
                             testHistory = testHistory,
                             bestResult = bestResult,
-                            onHistoryItemClick = {
-                                // Можно добавить просмотр деталей попытки
+                            onHistoryItemClick = { result ->
+                                // Используем attemptId из результата
+                                parentNavController?.navigate("quiz/test_results/${result.attemptId}")
                             }
                         )
                     }
@@ -513,7 +510,6 @@ private fun GeneralTestSectionContent(
     bestResult: GeneralTestResult?,
     onHistoryItemClick: (GeneralTestResult) -> Unit
 ) {
-    // ✅ ЗАМЕНИЛИ LazyColumn на Column
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(20.dp)
@@ -673,9 +669,9 @@ private fun GeneralTestBanner(
 private fun BestResultCard(bestResult: GeneralTestResult) {
     val percentage = bestResult.percentage
     val color = when {
-        percentage >= 90 -> Color(0xFF10B981) // Отлично - зелёный
-        percentage >= 70 -> Color(0xFFF59E0B) // Хорошо - оранжевый
-        else -> Color(0xFFEF4444) // Нужно подучить - красный
+        percentage >= 90 -> Color(0xFF10B981)
+        percentage >= 70 -> Color(0xFFF59E0B)
+        else -> Color(0xFFEF4444)
     }
 
     val ratingText = when {

@@ -1,13 +1,19 @@
 package com.example.devpath.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavHostController
 import com.example.devpath.data.repository.FavoritesRepository
 import com.example.devpath.data.repository.LessonRepository
 import com.example.devpath.data.repository.PracticeRepository
@@ -21,6 +27,7 @@ import kotlin.random.Random
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.example.devpath.domain.models.GeneralTestResult
 import androidx.navigation.compose.navigation
+import com.google.firebase.auth.FirebaseAuth
 
 @Composable
 fun DevPathNavGraph() {
@@ -210,32 +217,26 @@ fun DevPathNavGraph() {
                 )
             }
 
-            // Общий тест внутри вкладок
             composable("quiz/general_test") {
                 GeneralTestScreenContent(
-                    currentUserId = currentUser?.uid,
                     navController = navController,
                     onBackToDashboard = { shouldReturnToDashboard = true }
                 )
             }
 
-            // Результаты теста внутри вкладок
+            // Результаты теста внутри вкладок (обновленный маршрут с attemptId)
             composable(
-                route = "quiz/test_results/{correct}/{total}",
-                arguments = listOf(
-                    navArgument("correct") { type = NavType.StringType },
-                    navArgument("total") { type = NavType.StringType }
-                )
+                route = "quiz/test_results/{attemptId}",
+                arguments = listOf(navArgument("attemptId") { type = NavType.LongType })
             ) { backStackEntry ->
-                val correct = backStackEntry.arguments?.getString("correct")?.toIntOrNull() ?: 0
-                val total = backStackEntry.arguments?.getString("total")?.toIntOrNull() ?: 10
+                val attemptId = backStackEntry.arguments?.getLong("attemptId") ?: -1L
 
                 TestResultsScreen(
-                    correctAnswers = correct,
-                    totalQuestions = total,
+                    attemptId = attemptId,
+                    navController = navController,
                     onRetry = {
                         navController.navigate("quiz/general_test") {
-                            popUpTo("quiz/test_results/{correct}/{total}") { inclusive = true }
+                            popUpTo("quiz/test_results/{attemptId}") { inclusive = true }
                         }
                     },
                     onBackToMain = {
@@ -247,6 +248,22 @@ fun DevPathNavGraph() {
                     },
                     onBack = {
                         println("DEBUG: TestResultsScreen - запрос возврата")
+                        if (!navController.popBackStack()) {
+                            shouldReturnToDashboard = true
+                        }
+                    }
+                )
+            }
+
+            // Экран детального разбора теста
+            composable(
+                route = "quiz/test_detail/{attemptId}",
+                arguments = listOf(navArgument("attemptId") { type = NavType.LongType })
+            ) { backStackEntry ->
+                val attemptId = backStackEntry.arguments?.getLong("attemptId") ?: -1L
+                TestDetailScreen(
+                    attemptId = attemptId,
+                    onBack = {
                         if (!navController.popBackStack()) {
                             shouldReturnToDashboard = true
                         }
@@ -283,13 +300,27 @@ fun DevPathNavGraph() {
     }
 }
 
-// Обновленный GeneralTestScreenContent
 @Composable
 fun GeneralTestScreenContent(
-    currentUserId: String?,
-    navController: androidx.navigation.NavHostController,
+    navController: NavHostController,
     onBackToDashboard: () -> Unit
 ) {
+    // Состояние для хранения ID пользователя
+    var currentUserId by remember { mutableStateOf<String?>(null) }
+    val auth = Firebase.auth
+
+    // Подписываемся на изменения аутентификации
+    DisposableEffect(Unit) {
+        currentUserId = auth.currentUser?.uid
+        val listener = FirebaseAuth.AuthStateListener { auth ->
+            currentUserId = auth.currentUser?.uid
+        }
+        auth.addAuthStateListener(listener)
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
+    }
+
     val allQuestions = QuizRepository.getQuizQuestions()
     val randomQuestions = remember(allQuestions) {
         allQuestions.shuffled(Random(System.currentTimeMillis())).take(10)
@@ -297,22 +328,27 @@ fun GeneralTestScreenContent(
 
     val testViewModel: ProgressViewModel = hiltViewModel()
     var shouldNavigateToResults by remember { mutableStateOf(false) }
-    var resultCorrect by remember { mutableStateOf(0) }
-    var resultTotal by remember { mutableStateOf(0) }
+    var attemptId by remember { mutableStateOf<Long?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    // Добавляем BackHandler для этого экрана
     BackHandler {
-        println("DEBUG: GeneralTestScreen - обработка назад")
         if (!navController.popBackStack()) {
             onBackToDashboard()
         }
     }
 
-    // Эффект для навигации к результатам
-    if (shouldNavigateToResults) {
+    // Если пользователь ещё не загружен – показываем индикатор
+    if (currentUserId == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    // Навигация к результатам после сохранения попытки
+    if (shouldNavigateToResults && attemptId != null) {
         LaunchedEffect(Unit) {
-            navController.navigate("quiz/test_results/$resultCorrect/$resultTotal") {
+            navController.navigate("quiz/test_results/${attemptId}") {
                 popUpTo("quiz/general_test") { inclusive = true }
             }
         }
@@ -320,28 +356,31 @@ fun GeneralTestScreenContent(
 
     GeneralTestScreen(
         questions = randomQuestions,
-        onTestComplete = { quizResult ->
-            // Сохраняем результат теста в фоне
-            if (currentUserId != null) {
+        onTestComplete = { quizResult, userAnswers ->
+            coroutineScope.launch {
+                // Сохраняем детальную попытку
+                val id = testViewModel.progressRepository.saveTestAttempt(
+                    currentUserId!!,
+                    randomQuestions,
+                    userAnswers
+                )
+                attemptId = id
+
+                // Сохраняем результат в историю с attemptId
                 val testResult = GeneralTestResult(
                     correctAnswers = quizResult.correctAnswers,
                     totalQuestions = quizResult.totalQuestions,
                     percentage = if (quizResult.totalQuestions > 0)
                         (quizResult.correctAnswers * 100 / quizResult.totalQuestions)
-                    else 0
+                    else 0,
+                    attemptId = id
                 )
+                testViewModel.progressRepository.saveGeneralTestResult(currentUserId!!, testResult)
 
-                coroutineScope.launch {
-                    testViewModel.progressRepository.saveGeneralTestResult(currentUserId, testResult)
-                }
+                shouldNavigateToResults = true
             }
-
-            resultCorrect = quizResult.correctAnswers
-            resultTotal = quizResult.totalQuestions
-            shouldNavigateToResults = true
         },
         onBack = {
-            println("DEBUG: GeneralTestScreen onBack")
             if (!navController.popBackStack()) {
                 onBackToDashboard()
             }

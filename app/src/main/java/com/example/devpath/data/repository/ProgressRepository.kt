@@ -1,9 +1,11 @@
 package com.example.devpath.data.repository
 
 import com.example.devpath.data.local.AppDatabase
+import com.example.devpath.data.local.entity.TestAttemptEntity
 import com.example.devpath.data.local.entity.toDomain
 import com.example.devpath.data.local.entity.toEntity
 import com.example.devpath.domain.models.GeneralTestResult // ← ДОБАВЛЕН ИМПОРТ
+import com.example.devpath.domain.models.QuizQuestion
 import com.example.devpath.domain.models.UserProgress
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
@@ -106,6 +108,55 @@ class ProgressRepository @Inject constructor(
             val localProgress = localDb.userProgressDao().getProgress(userId)
             return@withContext localProgress?.toDomain()
         }
+    }
+
+    // В ProgressRepository
+    suspend fun saveTestAttempt(
+        userId: String,
+        questions: List<QuizQuestion>,
+        userAnswers: Map<Int, Int>
+    ): Long {
+        val details = buildTestAttemptDetails(questions, userAnswers)
+        val attempt = TestAttemptEntity(
+            userId = userId,
+            timestamp = System.currentTimeMillis(),
+            totalQuestions = questions.size,
+            correctAnswers = userAnswers.count { (index, answer) ->
+                questions[index].correctAnswerIndex == answer
+            },
+            detailsJson = details
+        )
+        return localDb.testAttemptDao().insertAttempt(attempt)
+    }
+
+    suspend fun getTestAttempt(attemptId: Long): TestAttemptEntity? {
+        return localDb.testAttemptDao().getAttemptById(attemptId)
+    }
+
+    private fun buildTestAttemptDetails(questions: List<QuizQuestion>, userAnswers: Map<Int, Int>): String {
+        val json = StringBuilder()
+        json.append("[")
+        questions.forEachIndexed { idx, q ->
+            val userAnswer = userAnswers[idx] ?: -1 // Если ответа нет, ставим -1
+            json.append("""{"question":"${escapeJson(q.question)}","options":[${q.options.joinToString(",") { "\"${escapeJson(it)}\"" }}],"correct":${q.correctAnswerIndex},"userAnswer":$userAnswer,"explanation":"${escapeJson(q.explanation)}","topic":"${q.topic}"}""")
+            if (idx < questions.size - 1) json.append(",")
+        }
+        json.append("]")
+        return json.toString()
+    }
+
+    // В ProgressRepository.kt
+    suspend fun getLastTestAttempt(userId: String): TestAttemptEntity? {
+        return localDb.testAttemptDao().getAttemptsByUserId(userId).firstOrNull()
+    }
+
+    suspend fun getUserTestAttempts(userId: String): List<TestAttemptEntity> {
+        return localDb.testAttemptDao().getAttemptsByUserId(userId)
+    }
+
+
+    private fun escapeJson(s: String): String {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
     }
 
     // 🔄 Синхронизация с Firebase в фоне

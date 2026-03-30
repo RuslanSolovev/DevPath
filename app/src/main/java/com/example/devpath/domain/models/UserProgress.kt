@@ -55,5 +55,6 @@ data class GeneralTestResult(
     val timestamp: Long = System.currentTimeMillis(),
     val correctAnswers: Int = 0,
     val totalQuestions: Int = 0,
-    val percentage: Int = 0
+    val percentage: Int = 0,
+    val attemptId: Long = -1L
 )
