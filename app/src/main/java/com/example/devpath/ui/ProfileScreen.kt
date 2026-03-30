@@ -28,14 +28,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.devpath.R
-import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.domain.models.UserProgress
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.tasks.await
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,29 +43,30 @@ fun ProfileScreen(
     onNavigateToTabs: () -> Unit
 ) {
     val currentUser = Firebase.auth.currentUser
-
-
-
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
     val coroutineScope = rememberCoroutineScope()
 
-    // Загружаем текущее имя из Firestore
+    // Загружаем существующий прогресс пользователя
+    var existingProgress by remember { mutableStateOf<UserProgress?>(null) }
     var displayName by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showSuccess by remember { mutableStateOf(false) }
 
+    // Загружаем существующий прогресс при входе (только локально)
     LaunchedEffect(Unit) {
         if (currentUser != null) {
             try {
-                val progress = progressRepo.loadProgress(currentUser.uid)
-                displayName = progress?.displayName ?: ""
+                // Используем loadLocalProgress для офлайн-загрузки
+                val progress = progressRepo.loadLocalProgress(currentUser.uid)
+                existingProgress = progress
+                // Используем существующее имя, если есть
+                displayName = progress?.displayName ?: currentUser.displayName ?: ""
+                println("DEBUG: Загружен существующий прогресс: уроков=${progress?.completedLessons?.size ?: 0}, XP=${progress?.totalXP ?: 0}")
             } catch (e: Exception) {
                 println("DEBUG: Ошибка загрузки прогресса: ${e.message}")
-                // Показываем сообщение об ошибке
-                errorMessage = "Не удалось загрузить данные. Проверьте подключение к интернету."
-                // Используем имя из Firebase Auth как fallback
+                // Даже при ошибке, используем имя из Firebase Auth
                 displayName = currentUser.displayName ?: ""
             }
         }
@@ -91,7 +91,10 @@ fun ProfileScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(onClick = {
+                        // При нажатии на стрелку просто возвращаемся назад без сохранения
+                        navController.popBackStack()
+                    }) {
                         Icon(
                             Icons.Default.ArrowBack,
                             contentDescription = "Назад",
@@ -259,14 +262,14 @@ fun ProfileScreen(
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
-                                        "Данные сохранены локально",
+                                        "Данные сохранены",
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontWeight = FontWeight.SemiBold
                                         ),
                                         color = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
                                     Text(
-                                        "При подключении к интернету они синхронизируются",
+                                        "Ваш прогресс сохранен!",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
@@ -380,6 +383,74 @@ fun ProfileScreen(
                     }
                 }
 
+                // Статистика пользователя (показываем, если есть прогресс)
+                if (existingProgress != null && (existingProgress?.completedLessons?.isNotEmpty() == true ||
+                            existingProgress?.totalXP ?: 0 > 0)) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Star,
+                                        contentDescription = "Статистика",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Text(
+                                        "Ваш прогресс",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "✅ Пройдено уроков: ${existingProgress?.completedLessons?.size ?: 0}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        "💻 Решено задач: ${existingProgress?.completedPracticeTasks?.size ?: 0}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        "📝 Пройдено тестов: ${existingProgress?.generalTestHistory?.size ?: 0}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        "⭐ Всего XP: ${existingProgress?.totalXP ?: 0}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        "🏆 Уровень: ${existingProgress?.level ?: 1}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        "🔥 Дней подряд: ${existingProgress?.dailyStreak ?: 0}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     // Карточка с информацией о приложении
                     Card(
@@ -446,15 +517,32 @@ fun ProfileScreen(
 
                                 coroutineScope.launch {
                                     try {
-                                        // Попробуем сохранить в Firestore
-                                        val progress = UserProgress.createEmpty(currentUser.uid)
-                                            .copy(displayName = displayName.trim())
+                                        // 🔥 Обновляем существующий прогресс локально
+                                        val currentProgress = existingProgress ?: UserProgress.createEmpty(currentUser.uid)
+                                        val updatedProgress = currentProgress.copy(
+                                            displayName = displayName.trim()
+                                        )
 
-                                        println("DEBUG: Сохраняем прогресс: ${progress.displayName}")
+                                        println("DEBUG: Сохраняем прогресс локально: имя='${updatedProgress.displayName}', уроков=${updatedProgress.completedLessons.size}, XP=${updatedProgress.totalXP}")
 
-                                        progressRepo.saveProgress(progress)
+                                        // ✅ Сохраняем локально (это работает даже без интернета)
+                                        progressRepo.saveProgress(updatedProgress)
 
-                                        // Успех - переходим дальше
+                                        // Обновляем существующий прогресс в памяти
+                                        existingProgress = updatedProgress
+
+                                        // 🔄 Попытка обновить FirebaseAuth (если есть интернет, это сработает)
+                                        try {
+                                            val profileUpdates = com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                                                .setDisplayName(displayName.trim())
+                                                .build()
+                                            currentUser.updateProfile(profileUpdates).await()
+                                            println("DEBUG: Имя обновлено в FirebaseAuth")
+                                        } catch (e: Exception) {
+                                            println("DEBUG: Не удалось обновить имя в FirebaseAuth (возможно нет интернета): ${e.message}")
+                                            // Игнорируем ошибку, главное - локальное сохранение
+                                        }
+
                                         showSuccess = true
                                         isLoading = false
 
@@ -463,21 +551,23 @@ fun ProfileScreen(
                                         onNavigateToTabs()
 
                                     } catch (e: Exception) {
-                                        println("DEBUG: Ошибка сохранения в Firestore: ${e.message}")
-
-                                        // Если не удалось сохранить в Firestore, используем локальное сохранение
-                                        saveProfileLocally(
-                                            userId = currentUser.uid,
-                                            displayName = displayName.trim()
-                                        )
-
-                                        errorMessage = "Сохранено локально. При подключении к интернету данные синхронизируются."
-                                        showSuccess = true
-                                        isLoading = false
-
-                                        // Даём время показать сообщение
-                                        kotlinx.coroutines.delay(2000)
-                                        onNavigateToTabs()
+                                        println("DEBUG: Ошибка сохранения: ${e.message}")
+                                        // Даже при ошибке, пытаемся сохранить локально еще раз
+                                        try {
+                                            val currentProgress = existingProgress ?: UserProgress.createEmpty(currentUser.uid)
+                                            val updatedProgress = currentProgress.copy(
+                                                displayName = displayName.trim()
+                                            )
+                                            progressRepo.saveProgress(updatedProgress)
+                                            existingProgress = updatedProgress
+                                            showSuccess = true
+                                            isLoading = false
+                                            kotlinx.coroutines.delay(1000)
+                                            onNavigateToTabs()
+                                        } catch (e2: Exception) {
+                                            errorMessage = "Ошибка сохранения. Попробуйте позже."
+                                            isLoading = false
+                                        }
                                     }
                                 }
                             }
@@ -509,7 +599,10 @@ fun ProfileScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    "Начать обучение в DevPath",
+                                    if (existingProgress?.completedLessons?.isNotEmpty() == true)
+                                        "Продолжить обучение"
+                                    else
+                                        "Начать обучение",
                                     style = MaterialTheme.typography.labelLarge.copy(
                                         fontWeight = FontWeight.SemiBold
                                     ),
@@ -522,7 +615,7 @@ fun ProfileScreen(
 
                 item {
                     Text(
-                        text = "После сохранения вы будете перенаправлены на главный экран",
+                        text = "Ваши достижения и прогресс сохраняются автоматически даже без интернета",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -534,13 +627,6 @@ fun ProfileScreen(
             }
         }
     }
-}
-
-// Функция для локального сохранения профиля
-private fun saveProfileLocally(userId: String, displayName: String) {
-
-    println("DEBUG: Локальное сохранение профиля для $userId: $displayName")
-
 }
 
 @Composable
