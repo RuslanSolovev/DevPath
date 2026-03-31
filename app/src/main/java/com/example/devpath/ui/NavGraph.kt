@@ -30,8 +30,11 @@ import androidx.navigation.compose.navigation
 import com.google.firebase.auth.FirebaseAuth
 
 @Composable
-fun DevPathNavGraph() {
-    val navController = rememberNavController()
+fun DevPathNavGraph(
+    navController: NavHostController = rememberNavController(),
+    onNavigationVisibilityChanged: (Boolean) -> Unit = {}
+) {
+
     val currentUser = Firebase.auth.currentUser
     val startDestination = if (currentUser != null) "dashboard" else "auth"
 
@@ -40,6 +43,9 @@ fun DevPathNavGraph() {
 
     // Состояние для управления возвратом на dashboard
     var shouldReturnToDashboard by remember { mutableStateOf(false) }
+
+    // Состояние для отображения навигационных кнопок в DashboardScreen
+    var showNavButtons by remember { mutableStateOf(true) }
 
     // Синхронизация избранного при запуске
     LaunchedEffect(currentUser) {
@@ -57,6 +63,23 @@ fun DevPathNavGraph() {
             println("DEBUG: Возвращаемся на dashboard")
             navController.popBackStack("dashboard", false)
             shouldReturnToDashboard = false
+        }
+    }
+
+    LaunchedEffect(navController) {
+        navController.addOnDestinationChangedListener { _, destination, _ ->
+            val route = destination.route ?: ""
+            val shouldShow = when {
+                route.startsWith("tabs/") -> false
+                route.startsWith("lesson/") -> false
+                route.startsWith("practice/") -> false
+                route.startsWith("quiz/question/") -> false
+                route.startsWith("quiz/general_test") -> false
+                route.startsWith("quiz/test_results/") -> false
+                route.startsWith("quiz/test_detail/") -> false
+                else -> true
+            }
+            onNavigationVisibilityChanged(shouldShow)
         }
     }
 
@@ -84,17 +107,8 @@ fun DevPathNavGraph() {
 
         composable("dashboard") {
             DashboardScreen(
-                onSignOut = {
-                    Firebase.auth.signOut()
-                    navController.navigate("auth") {
-                        popUpTo("dashboard") { inclusive = true }
-                    }
-                },
                 onNavigateToTabs = { initialTab ->
                     navController.navigate("tabs/$initialTab")
-                },
-                onNavigateToProfile = {
-                    navController.navigate("profile")
                 },
                 onNavigateToPractice = {
                     navController.navigate("tabs/practice")
@@ -105,7 +119,8 @@ fun DevPathNavGraph() {
                 onNavigateToInterview = {
                     navController.navigate("tabs/interview")
                 },
-                parentNavController = navController
+                parentNavController = navController,
+                showNavigationButtons = showNavButtons
             )
         }
 

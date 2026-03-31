@@ -14,7 +14,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.core.content.ContextCompat
 import com.example.devpath.data.repository.LocalThemeRepository
 import com.example.devpath.data.repository.ThemeRepository
-import com.example.devpath.ui.DevPathNavGraph
+import com.example.devpath.ui.MainScreen  // ← Импортируем MainScreen
 import com.example.devpath.ui.theme.DevPathTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -51,12 +51,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         // ВАЖНО: Перехватываем системную кнопку "Назад" на уровне Activity
-        // чтобы предотвратить закрытие приложения
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 println("DEBUG: onBackPressedDispatcher - перехвачено в MainActivity")
                 // НИЧЕГО НЕ ДЕЛАЕМ - позволим Compose обработать навигацию
-                // Не вызываем finish() и не вызываем isEnabled = false
             }
         })
 
@@ -72,7 +70,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             CompositionLocalProvider(LocalThemeRepository provides themeRepository) {
                 DevPathTheme {
-                    DevPathNavGraph()
+                    // 🔥 ЗАМЕНЯЕМ DevPathNavGraph на MainScreen
+                    MainScreen()
                 }
             }
         }
