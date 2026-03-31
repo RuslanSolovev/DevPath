@@ -20,7 +20,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.devpath.data.repository.LocalThemeRepository
-import com.example.devpath.domain.models.UserProgress
 import com.example.devpath.ui.theme.AppTheme
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.google.firebase.auth.FirebaseAuth
@@ -55,10 +54,8 @@ fun MainScreen() {
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
 
-        // ✅ Добавляем состояние для управления видимостью навигации
         var showMainNavigation by remember { mutableStateOf(true) }
 
-        // Скрываем нижнюю навигацию на экранах профиля и настроек
         val showBottomBar = showMainNavigation &&
                 currentRoute != "profile" &&
                 currentRoute != "settings"
@@ -145,9 +142,17 @@ fun MainScreen() {
                             onNavigateToSettings = { navController.navigate("settings") }
                         )
                     }
-                    composable(MainTab2.CHAT.name) { ChatTabScreen() }
+
+                    // ✅ Заменяем заглушку на реальный экран чатов
+                    composable(MainTab2.CHAT.name) {
+                        val userId = Firebase.auth.currentUser?.uid ?: ""
+                        ChatsScreen(
+                            userId = userId,
+                            navController = navController
+                        )
+                    }
+
                     composable(MainTab2.TEXTBOOK.name) {
-                        // ✅ Передаём колбэк для управления видимостью навигации
                         DevPathNavGraph(
                             navController = rememberNavController(),
                             onNavigationVisibilityChanged = { isVisible ->
@@ -155,14 +160,32 @@ fun MainScreen() {
                             }
                         )
                     }
+
                     composable("profile") {
                         ProfileScreen(
                             navController = navController,
                             onNavigateToTabs = { navController.popBackStack() }
                         )
                     }
+
                     composable("settings") {
                         SettingsScreen(onBack = { navController.popBackStack() })
+                    }
+
+                    // Экран друзей
+                    composable("friends") {
+                        FriendsScreen(navController = navController)
+                    }
+
+                    // Экран поиска друзей
+                    composable("search_friends") {
+                        SearchFriendsScreen(navController = navController)
+                    }
+
+                    // Экран деталей чата
+                    composable("chat_detail/{chatId}") { backStackEntry ->
+                        val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                        ChatDetailScreen(chatId = chatId, navController = navController)
                     }
                 }
             }
@@ -200,7 +223,6 @@ fun HomeTabScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.Top
     ) {
-        // Карточка пользователя: аватар + имя (клик → профиль), иконка шестерёнки (клик → настройки)
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = MaterialTheme.shapes.medium,
@@ -212,7 +234,6 @@ fun HomeTabScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Аватар + имя – кликабельны для перехода в профиль
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -249,7 +270,6 @@ fun HomeTabScreen(
                         )
                     }
                 }
-                // Иконка настроек (шестерёнка) – переход в настройки
                 IconButton(onClick = onNavigateToSettings) {
                     Icon(
                         Icons.Default.Settings,
@@ -258,37 +278,6 @@ fun HomeTabScreen(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun ChatTabScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Icon(
-                Icons.Default.Chat,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-            )
-            Text(
-                text = "Чаты с друзьями",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Скоро здесь появится общение с другими разработчиками",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
         }
     }
 }
@@ -305,7 +294,6 @@ fun SettingsScreen(onBack: () -> Unit) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // ✅ Заголовок с кнопкой «Назад»
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
