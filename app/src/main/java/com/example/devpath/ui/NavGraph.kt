@@ -13,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import com.example.devpath.data.repository.FavoritesRepository
 import com.example.devpath.data.repository.LessonRepository
@@ -66,20 +67,44 @@ fun DevPathNavGraph(
         }
     }
 
-    LaunchedEffect(navController) {
-        navController.addOnDestinationChangedListener { _, destination, _ ->
+    // Внутри DevPathNavGraph - используем DisposableEffect для правильной очистки
+    DisposableEffect(navController) {
+        // Создаём листенер
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
             val route = destination.route ?: ""
+
+            // ✅ Исправленные проверки маршрутов
             val shouldShow = when {
-                route.startsWith("tabs/") -> false
+                // Скрываем навигацию внутри учебного процесса
                 route.startsWith("lesson/") -> false
                 route.startsWith("practice/") -> false
-                route.startsWith("quiz/question/") -> false
-                route.startsWith("quiz/general_test") -> false
-                route.startsWith("quiz/test_results/") -> false
-                route.startsWith("quiz/test_detail/") -> false
-                else -> true
+                route.startsWith("quiz/") -> false
+                route.startsWith("interview/") -> false
+                route.startsWith("tabs_main/") -> false  // ← КЛЮЧЕВОЕ: был "tabs/", а надо "tabs_main/"
+
+                // Показываем на главных экранах учебника
+                route == "dashboard" -> true
+                route == "auth" -> true
+
+                // По умолчанию показываем (для безопасности)
+                else -> {
+                    println("DEBUG: Неизвестный маршрут '$route', показываем навигацию")
+                    true
+                }
             }
+
+            println("DEBUG: 🧭 Route: '$route' → showNavigation: $shouldShow")
             onNavigationVisibilityChanged(shouldShow)
+        }
+
+        // Добавляем листенер при входе в эффект
+        navController.addOnDestinationChangedListener(listener)
+        println("DEBUG: 📡 Listener added to inner navController")
+
+        // ✅ onDispose вызывается автоматически при выходе из композиции
+        onDispose {
+            navController.removeOnDestinationChangedListener(listener)
+            println("DEBUG: 📡 Listener removed")
         }
     }
 
