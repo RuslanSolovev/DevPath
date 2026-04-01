@@ -35,6 +35,10 @@ fun FriendsScreen(
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Друзья", "Заявки ко мне", "Мои заявки")
 
+    // Состояние для диалога
+    var selectedFriend by remember { mutableStateOf<UserProfile?>(null) }
+    var showDialog by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         viewModel.loadFriends(currentUserId)
         viewModel.loadIncomingRequests(currentUserId)
@@ -72,11 +76,71 @@ fun FriendsScreen(
             }
 
             when (selectedTab) {
-                0 -> FriendsList(friends, currentUserId, viewModel)
+                0 -> FriendsList(
+                    friends = friends,
+                    currentUserId = currentUserId,
+                    viewModel = viewModel,
+                    navController = navController,
+                    onFriendClick = { friend ->
+                        selectedFriend = friend
+                        showDialog = true
+                    }
+                )
                 1 -> IncomingRequestsList(incomingRequests, currentUserId, viewModel)
                 2 -> SentRequestsList(sentRequests, viewModel)
             }
         }
+    }
+
+    // Диалог вынесен на уровень выше
+    if (showDialog && selectedFriend != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showDialog = false
+                selectedFriend = null
+            },
+            title = { Text(selectedFriend?.name?.ifEmpty { "Пользователь" } ?: "Пользователь") },
+            text = { Text("Выберите действие") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val friend = selectedFriend ?: return@TextButton
+                        showDialog = false
+                        viewModel.createChatAndNavigate(
+                            currentUserId = currentUserId,
+                            friendId = friend.userId,
+                            navController = navController
+                        )
+                        selectedFriend = null
+                    }
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Написать сообщение")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        val friend = selectedFriend ?: return@TextButton
+                        showDialog = false
+                        viewModel.removeFriend(currentUserId, friend.userId)
+                        selectedFriend = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Удалить из друзей")
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -84,7 +148,9 @@ fun FriendsScreen(
 fun FriendsList(
     friends: List<UserProfile>,
     currentUserId: String,
-    viewModel: ChatsViewModel
+    viewModel: ChatsViewModel,
+    navController: NavHostController,
+    onFriendClick: (UserProfile) -> Unit
 ) {
     if (friends.isEmpty()) {
         Box(
@@ -115,12 +181,10 @@ fun FriendsList(
         }
     } else {
         LazyColumn {
-            items(friends) { friend ->
+            items(friends, key = { it.userId }) { friend ->
                 FriendItem(
                     friend = friend,
-                    onRemove = {
-                        viewModel.removeFriend(currentUserId, friend.userId)
-                    }
+                    onClick = { onFriendClick(friend) }
                 )
                 Divider()
             }
@@ -131,11 +195,12 @@ fun FriendsList(
 @Composable
 fun FriendItem(
     friend: UserProfile,
-    onRemove: () -> Unit
+    onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(8.dp)
     ) {
         Row(
@@ -165,13 +230,11 @@ fun FriendItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            IconButton(onClick = onRemove) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Удалить",
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -206,7 +269,7 @@ fun IncomingRequestsList(
         }
     } else {
         LazyColumn {
-            items(requests) { request ->
+            items(requests, key = { it.requestId }) { request ->
                 RequestItem(
                     request = request,
                     onAccept = {
@@ -318,7 +381,7 @@ fun SentRequestsList(
         }
     } else {
         LazyColumn {
-            items(requests) { request ->
+            items(requests, key = { it.requestId }) { request ->
                 SentRequestItem(request = request)
                 Divider()
             }
@@ -345,9 +408,9 @@ fun SentRequestItem(request: FriendRequest) {
                     Icons.Default.Outbox,
                     contentDescription = null,
                     tint = when (request.status) {
-                        "pending" -> MaterialTheme.colorScheme.tertiary  // оранжевый/жёлтый
-                        "accepted" -> MaterialTheme.colorScheme.primary  // основной цвет
-                        else -> MaterialTheme.colorScheme.error          // красный для ошибок
+                        "pending" -> MaterialTheme.colorScheme.tertiary
+                        "accepted" -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.error
                     }
                 )
             }

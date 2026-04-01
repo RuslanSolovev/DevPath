@@ -26,6 +26,8 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 
 enum class MainTab2(val title: String) {
     HOME("Главная"),
@@ -182,10 +184,15 @@ fun MainScreen() {
                         SearchFriendsScreen(navController = navController)
                     }
 
-                    // Экран деталей чата
-                    composable("chat_detail/{chatId}") { backStackEntry ->
+                    composable(
+                        route = "chat_detail/{chatId}",
+                        arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+                    ) { backStackEntry ->
                         val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
-                        ChatDetailScreen(chatId = chatId, navController = navController)
+                        ChatDetailScreen(
+                            chatId = chatId,
+                            navController = navController
+                        )
                     }
                 }
             }

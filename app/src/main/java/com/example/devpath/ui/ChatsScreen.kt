@@ -19,7 +19,7 @@ import com.example.devpath.ui.viewmodel.ChatsViewModel
 @Composable
 fun ChatsScreen(
     userId: String,
-    navController: NavHostController = androidx.navigation.compose.rememberNavController()
+    navController: NavHostController  // ← УБРАТЬ значение по умолчанию!
 ) {
     val viewModel: ChatsViewModel = hiltViewModel()
     val chats by viewModel.chats.collectAsState()
@@ -48,7 +48,12 @@ fun ChatsScreen(
                 ChatItem(
                     chat = chat,
                     onClick = {
-                        navController.navigate("chat_detail/${chat.chatId}")
+                        // Проверка, что chatId не пустой
+                        if (chat.chatId.isNotBlank()) {
+                            navController.navigate("chat_detail/${chat.chatId}")
+                        } else {
+                            println("DEBUG: chatId is blank!")
+                        }
                     }
                 )
                 Divider()

@@ -17,7 +17,6 @@ import com.example.devpath.domain.models.UserProfile
 import com.example.devpath.ui.viewmodel.ChatsViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
-import kotlinx.coroutines.flow.first
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,27 +28,25 @@ fun SearchFriendsScreen(
     val searchResults by viewModel.searchResults.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val incomingRequests by viewModel.incomingRequests.collectAsState()
+    val sentRequests by viewModel.sentRequests.collectAsState()  // ✅ добавлено
 
     var query by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
 
-    // Загружаем друзей и заявки
+    // Загружаем друзей, заявки и отправленные заявки
     LaunchedEffect(Unit) {
         viewModel.loadFriends(currentUserId)
         viewModel.loadIncomingRequests(currentUserId)
+        viewModel.loadSentRequests(currentUserId)  // ✅ добавлено
     }
 
     // Фильтруем результаты поиска
-    val filteredResults = remember(searchResults, friends, incomingRequests, currentUserId) {
+    val filteredResults = remember(searchResults, friends, incomingRequests, sentRequests, currentUserId) {
         searchResults.filter { user ->
-            // Не показываем себя
             user.userId != currentUserId &&
-                    // Не показываем тех, кто уже в друзьях
                     !friends.any { it.userId == user.userId } &&
-                    // Не показываем тех, кому уже отправлена заявка
                     !incomingRequests.any { it.fromUserId == user.userId && it.status == "pending" } &&
-                    // Не показываем тех, кому мы уже отправили заявку
-                    !viewModel.sentRequests.value.any { it.toUserId == user.userId && it.status == "pending" }
+                    !sentRequests.any { it.toUserId == user.userId && it.status == "pending" }
         }
     }
 

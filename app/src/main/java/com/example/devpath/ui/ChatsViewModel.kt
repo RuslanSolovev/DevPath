@@ -2,6 +2,7 @@ package com.example.devpath.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.navigation.NavHostController
 import com.example.devpath.data.repository.ChatRepository
 import com.example.devpath.domain.models.Chat
 import com.example.devpath.domain.models.FriendRequest
@@ -37,7 +38,6 @@ class ChatsViewModel @Inject constructor(
     private val _sentRequests = MutableStateFlow<List<FriendRequest>>(emptyList())
     val sentRequests: StateFlow<List<FriendRequest>> = _sentRequests.asStateFlow()
 
-    // Загрузить отправленные заявки
     fun loadSentRequests(userId: String) {
         viewModelScope.launch {
             chatRepository.getSentRequests(userId).collect { requests ->
@@ -50,6 +50,19 @@ class ChatsViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.getFriends(userId).collect { friends ->
                 _friends.value = friends
+            }
+        }
+    }
+
+    fun createChatAndNavigate(
+        currentUserId: String,
+        friendId: String,
+        navController: NavHostController
+    ) {
+        viewModelScope.launch {
+            val chat = chatRepository.createOrGetChat(currentUserId, friendId)
+            chat?.let {
+                navController.navigate("chat_detail/${it.chatId}")
             }
         }
     }
