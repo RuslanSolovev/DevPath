@@ -147,7 +147,9 @@ private fun signUp(
             val userProfile = hashMapOf(
                 "userId" to userId,
                 "name" to cleanName,
+                "nameLowercase" to cleanName.lowercase(),  // ← добавить
                 "email" to userEmail,
+                "emailLowercase" to userEmail.lowercase(),  // ← добавить
                 "online" to true,
                 "lastSeen" to com.google.firebase.Timestamp.now(),
                 "createdAt" to com.google.firebase.Timestamp.now()

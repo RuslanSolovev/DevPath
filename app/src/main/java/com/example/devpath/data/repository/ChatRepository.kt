@@ -1,6 +1,7 @@
 package com.example.devpath.data.repository
 
 import com.example.devpath.domain.models.*
+import com.google.firebase.firestore.AggregateSource
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -18,41 +19,44 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor() {
     private val db: FirebaseFirestore = Firebase.firestore
 
-    // Получить список друзей пользователя
     fun getFriends(userId: String): Flow<List<UserProfile>> = callbackFlow {
+        val friendIds = mutableSetOf<String>()
+
         val query1 = db.collection("friendships").whereEqualTo("userId1", userId)
         val query2 = db.collection("friendships").whereEqualTo("userId2", userId)
+
+        var query1Completed = false
+        var query2Completed = false
+
+        fun checkAndSend() {
+            if (query1Completed && query2Completed) {
+                if (friendIds.isEmpty()) {
+                    trySend(emptyList())
+                    return
+                }
+                db.collection("users")
+                    .whereIn("userId", friendIds.toList())
+                    .get()
+                    .addOnSuccessListener { snapshot ->
+                        val friends = snapshot.documents.mapNotNull { it.toObject(UserProfile::class.java) }
+                        trySend(friends)
+                    }
+                    .addOnFailureListener { error ->
+                        close(error)
+                    }
+            }
+        }
 
         val subscription1 = query1.addSnapshotListener { snapshot, error ->
             if (error != null) {
                 close(error)
                 return@addSnapshotListener
             }
-            val friendIds = mutableListOf<String>()
             snapshot?.documents?.forEach { doc ->
-                val friendship = doc.toObject<Friendship>()
-                if (friendship?.userId1 == userId) {
-                    friendIds.add(friendship.userId2)
-                } else if (friendship?.userId2 == userId) {
-                    friendIds.add(friendship.userId1)
-                }
+                doc.toObject(Friendship::class.java)?.userId2?.let { friendIds.add(it) }
             }
-
-            if (friendIds.isEmpty()) {
-                trySend(emptyList())
-                return@addSnapshotListener
-            }
-
-            db.collection("users")
-                .whereIn("userId", friendIds)
-                .addSnapshotListener { usersSnapshot, userError ->
-                    if (userError != null) {
-                        close(userError)
-                        return@addSnapshotListener
-                    }
-                    val friends = usersSnapshot?.documents?.mapNotNull { it.toObject<UserProfile>() } ?: emptyList()
-                    trySend(friends)
-                }
+            query1Completed = true
+            checkAndSend()
         }
 
         val subscription2 = query2.addSnapshotListener { snapshot, error ->
@@ -60,28 +64,11 @@ class ChatRepository @Inject constructor() {
                 close(error)
                 return@addSnapshotListener
             }
-            val friendIds = mutableListOf<String>()
             snapshot?.documents?.forEach { doc ->
-                val friendship = doc.toObject<Friendship>()
-                if (friendship?.userId1 == userId) {
-                    friendIds.add(friendship.userId2)
-                } else if (friendship?.userId2 == userId) {
-                    friendIds.add(friendship.userId1)
-                }
+                doc.toObject(Friendship::class.java)?.userId1?.let { friendIds.add(it) }
             }
-
-            if (friendIds.isNotEmpty()) {
-                db.collection("users")
-                    .whereIn("userId", friendIds)
-                    .addSnapshotListener { usersSnapshot, userError ->
-                        if (userError != null) {
-                            close(userError)
-                            return@addSnapshotListener
-                        }
-                        val friends = usersSnapshot?.documents?.mapNotNull { it.toObject<UserProfile>() } ?: emptyList()
-                        trySend(friends)
-                    }
-            }
+            query2Completed = true
+            checkAndSend()
         }
 
         awaitClose {
@@ -90,7 +77,6 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Получить входящие заявки
     fun getIncomingRequests(userId: String): Flow<List<FriendRequest>> = callbackFlow {
         val query = db.collection("friend_requests")
             .whereEqualTo("toUserId", userId)
@@ -102,7 +88,7 @@ class ChatRepository @Inject constructor() {
                 return@addSnapshotListener
             }
             val requests = snapshot?.documents?.mapNotNull { doc ->
-                val request = doc.toObject<FriendRequest>()
+                val request = doc.toObject(FriendRequest::class.java)
                 request?.copy(requestId = doc.id)
             } ?: emptyList()
             trySend(requests)
@@ -111,7 +97,6 @@ class ChatRepository @Inject constructor() {
         awaitClose { subscription.remove() }
     }
 
-    // Получить отправленные заявки
     fun getSentRequests(userId: String): Flow<List<FriendRequest>> = callbackFlow {
         val query = db.collection("friend_requests")
             .whereEqualTo("fromUserId", userId)
@@ -123,7 +108,7 @@ class ChatRepository @Inject constructor() {
                 return@addSnapshotListener
             }
             val requests = snapshot?.documents?.mapNotNull { doc ->
-                val request = doc.toObject<FriendRequest>()
+                val request = doc.toObject(FriendRequest::class.java)
                 request?.copy(requestId = doc.id)
             } ?: emptyList()
             trySend(requests)
@@ -132,7 +117,18 @@ class ChatRepository @Inject constructor() {
         awaitClose { subscription.remove() }
     }
 
-    // Отправить заявку
+    suspend fun getMessagesCount(chatId: String): Long {
+        return try {
+            val query = db.collection("messages").whereEqualTo("chatId", chatId)
+            val aggregateQuery = query.count()
+            val snapshot = aggregateQuery.get(AggregateSource.SERVER).await()
+            snapshot.count
+        } catch (e: Exception) {
+            e.printStackTrace()
+            0
+        }
+    }
+
     suspend fun sendFriendRequest(fromUserId: String, toUserId: String): Boolean {
         return try {
             val existingRequest = db.collection("friend_requests")
@@ -143,13 +139,29 @@ class ChatRepository @Inject constructor() {
                 .await()
 
             if (existingRequest.isEmpty) {
-                val request = FriendRequest(
-                    fromUserId = fromUserId,
-                    toUserId = toUserId,
-                    status = "pending"
-                )
-                db.collection("friend_requests").add(request).await()
-                true
+                val existingFriendship = db.collection("friendships")
+                    .whereEqualTo("userId1", fromUserId)
+                    .whereEqualTo("userId2", toUserId)
+                    .get()
+                    .await()
+
+                val existingFriendship2 = db.collection("friendships")
+                    .whereEqualTo("userId1", toUserId)
+                    .whereEqualTo("userId2", fromUserId)
+                    .get()
+                    .await()
+
+                if (existingFriendship.isEmpty && existingFriendship2.isEmpty) {
+                    val request = FriendRequest(
+                        fromUserId = fromUserId,
+                        toUserId = toUserId,
+                        status = "pending"
+                    )
+                    db.collection("friend_requests").add(request).await()
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
@@ -159,7 +171,6 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Принять заявку (без создания чата)
     suspend fun acceptFriendRequest(requestId: String, fromUserId: String, toUserId: String): Boolean {
         return try {
             if (requestId.isBlank()) {
@@ -184,7 +195,6 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Отклонить заявку
     suspend fun rejectFriendRequest(requestId: String): Boolean {
         return try {
             if (requestId.isBlank()) return false
@@ -197,7 +207,25 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Удалить из друзей
+    suspend fun deleteChat(chatId: String): Boolean {
+        return try {
+            val messagesQuery = db.collection("messages")
+                .whereEqualTo("chatId", chatId)
+                .get()
+                .await()
+
+            messagesQuery.documents.forEach { doc ->
+                doc.reference.delete().await()
+            }
+
+            db.collection("chats").document(chatId).delete().await()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
     suspend fun removeFriend(userId: String, friendId: String): Boolean {
         return try {
             val query = db.collection("friendships")
@@ -217,15 +245,29 @@ class ChatRepository @Inject constructor() {
                 query.documents.forEach { it.reference.delete().await() }
             }
 
+            val requests = db.collection("friend_requests")
+                .whereEqualTo("fromUserId", userId)
+                .whereEqualTo("toUserId", friendId)
+                .get()
+                .await()
+            requests.documents.forEach { it.reference.delete().await() }
+
+            val requests2 = db.collection("friend_requests")
+                .whereEqualTo("fromUserId", friendId)
+                .whereEqualTo("toUserId", userId)
+                .get()
+                .await()
+            requests2.documents.forEach { it.reference.delete().await() }
+
             deletePersonalChat(userId, friendId)
 
             true
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
-    // Создать личный чат
     suspend fun createPersonalChat(userId1: String, userId2: String): String? {
         return try {
             val chat = Chat(
@@ -241,27 +283,23 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Получить или создать чат между пользователями (исправленная версия)
     suspend fun createOrGetChat(userId1: String, userId2: String): Chat? {
         return try {
-            // Ищем чаты, где userId1 есть в participants
             val query = db.collection("chats")
                 .whereEqualTo("type", "personal")
                 .whereArrayContains("participants", userId1)
 
             val snapshot = query.get().await()
 
-            // Фильтруем в коде, проверяя наличие userId2
             val existingChat = snapshot.documents.firstOrNull { doc ->
                 val participants = doc.get("participants") as? List<String> ?: emptyList()
                 participants.contains(userId2)
             }
 
             if (existingChat != null) {
-                return existingChat.toObject<Chat>()?.copy(chatId = existingChat.id)
+                return existingChat.toObject(Chat::class.java)?.copy(chatId = existingChat.id)
             }
 
-            // Создаём новый чат
             val chat = Chat(
                 type = "personal",
                 participants = listOf(userId1, userId2),
@@ -275,7 +313,6 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Удалить личный чат
     private suspend fun deletePersonalChat(userId1: String, userId2: String) {
         val query = db.collection("chats")
             .whereEqualTo("type", "personal")
@@ -295,53 +332,198 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Получить чаты пользователя
-    fun getChats(userId: String): Flow<List<Chat>> = callbackFlow {
-        val query = db.collection("chats")
-            .whereArrayContains("participants", userId)
-            .orderBy("lastMessageTime", Query.Direction.DESCENDING)
+    fun getMessages(chatId: String, limit: Long = 30, lastMessage: Message? = null): Flow<List<Message>> = callbackFlow {
+        var query = db.collection("messages")
+            .whereEqualTo("chatId", chatId)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(limit)
 
-        val subscription = query.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                close(error)
-                return@addSnapshotListener
-            }
-            val chats = snapshot?.documents?.mapNotNull { doc ->
-                val chat = doc.toObject<Chat>()
-                chat?.copy(chatId = doc.id)
-            } ?: emptyList()
-            trySend(chats)
+        if (lastMessage != null && lastMessage.timestamp != null) {
+            query = query.startAfter(lastMessage.timestamp)
         }
 
-        awaitClose { subscription.remove() }
-    }
-
-    // Получить сообщения чата
-    fun getMessages(chatId: String): Flow<List<Message>> = callbackFlow {
-        val query = db.collection("messages")
-            .whereEqualTo("chatId", chatId)
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-
         val subscription = query.addSnapshotListener { snapshot, error ->
             if (error != null) {
                 close(error)
                 return@addSnapshotListener
             }
-            val messages = snapshot?.documents?.mapNotNull { it.toObject<Message>() } ?: emptyList()
+            val messages = snapshot?.documents?.mapNotNull { doc ->
+                val message = doc.toObject(Message::class.java)
+                message?.copy(messageId = doc.id)
+            } ?: emptyList()
             trySend(messages)
         }
 
         awaitClose { subscription.remove() }
     }
 
-    // Отправить сообщение
-    suspend fun sendMessage(chatId: String, senderId: String, text: String): Boolean {
+    suspend fun loadMoreMessages(chatId: String, lastMessage: Message, limit: Long = 30): List<Message> {
         return try {
+            val query = db.collection("messages")
+                .whereEqualTo("chatId", chatId)
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .startAfter(lastMessage.timestamp)
+                .limit(limit)
+                .get()
+                .await()
+
+            query.documents.mapNotNull { doc ->
+                val message = doc.toObject(Message::class.java)
+                message?.copy(messageId = doc.id)
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun updateUserOnlineStatus(userId: String, isOnline: Boolean) {
+        try {
+            db.collection("users").document(userId)
+                .update(
+                    mapOf(
+                        "online" to isOnline,
+                        "lastSeen" to com.google.firebase.Timestamp.now()
+                    )
+                )
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun getUserOnlineStatus(userId: String): Boolean {
+        return try {
+            val doc = db.collection("users").document(userId).get().await()
+            doc.getBoolean("online") ?: false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun observeUserOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
+        val subscription = db.collection("users").document(userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val isOnline = snapshot?.getBoolean("online") ?: false
+                trySend(isOnline)
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun editMessage(messageId: String, newText: String): Boolean {
+        return try {
+            db.collection("messages").document(messageId)
+                .update(
+                    mapOf(
+                        "text" to newText,
+                        "edited" to true,
+                        "editedAt" to com.google.firebase.Timestamp.now()
+                    )
+                )
+                .await()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun searchUsers(query: String): List<UserProfile> {
+        if (query.isBlank()) return emptyList()
+
+        return try {
+            val normalizedQuery = query.trim().lowercase()
+
+            val nameSnapshot = db.collection("users")
+                .whereGreaterThanOrEqualTo("nameLowercase", normalizedQuery)
+                .whereLessThanOrEqualTo("nameLowercase", normalizedQuery + "\uf8ff")
+                .limit(20)
+                .get()
+                .await()
+
+            val nameResults = nameSnapshot.documents.mapNotNull { it.toObject(UserProfile::class.java) }
+
+            val emailSnapshot = db.collection("users")
+                .whereGreaterThanOrEqualTo("emailLowercase", normalizedQuery)
+                .whereLessThanOrEqualTo("emailLowercase", normalizedQuery + "\uf8ff")
+                .limit(20)
+                .get()
+                .await()
+
+            val emailResults = emailSnapshot.documents.mapNotNull { it.toObject(UserProfile::class.java) }
+
+            (nameResults + emailResults).distinctBy { it.userId }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun deleteMessage(messageId: String): Boolean {
+        return try {
+            db.collection("messages").document(messageId).delete().await()
+            true
+        } catch (e: Exception) {
+            println("DEBUG: Ошибка удаления сообщения: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun markMessageAsRead(messageId: String, userId: String) {
+        try {
+            val doc = db.collection("messages").document(messageId).get().await()
+            val senderId = doc.getString("senderId") ?: ""
+            if (senderId != userId) {
+                db.collection("messages").document(messageId)
+                    .update("readBy", FieldValue.arrayUnion(userId))
+                    .await()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun markAllMessagesAsRead(chatId: String, userId: String) {
+        val messages = db.collection("messages")
+            .whereEqualTo("chatId", chatId)
+            .get()
+            .await()
+
+        messages.documents.forEach { doc ->
+            val readBy = doc.get("readBy") as? List<String> ?: emptyList()
+            val senderId = doc.getString("senderId") ?: ""
+            if (!readBy.contains(userId) && senderId != userId) {
+                doc.reference.update("readBy", FieldValue.arrayUnion(userId)).await()
+            }
+        }
+    }
+
+    suspend fun getMessage(messageId: String): Message? {
+        return try {
+            val doc = db.collection("messages").document(messageId).get().await()
+            doc.toObject(Message::class.java)?.copy(messageId = doc.id)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    suspend fun sendMessage(chatId: String, senderId: String, text: String, replyToId: String = "", replyToText: String = "", replyToSenderName: String = ""): Boolean {
+        return try {
+            val sender = getUser(senderId)
+            val senderName = sender?.name ?: "Пользователь"
+
             val message = Message(
                 chatId = chatId,
                 senderId = senderId,
+                senderName = senderName,
                 text = text,
-                timestamp = com.google.firebase.Timestamp.now()
+                timestamp = com.google.firebase.Timestamp.now(),
+                readBy = emptyList(),
+                deliveredTo = listOf(senderId),
+                replyToId = replyToId,
+                replyToText = replyToText,
+                replyToSenderName = replyToSenderName
             )
             db.collection("messages").add(message).await()
 
@@ -349,6 +531,7 @@ class ChatRepository @Inject constructor() {
                 .update(
                     mapOf(
                         "lastMessage" to text,
+                        "lastMessageSender" to senderName,
                         "lastMessageTime" to com.google.firebase.Timestamp.now()
                     )
                 )
@@ -359,25 +542,74 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Отметить сообщение как прочитанное
-    suspend fun markMessageAsRead(messageId: String, userId: String) {
-        db.collection("messages").document(messageId)
-            .update("readBy", FieldValue.arrayUnion(userId))
-            .await()
+    fun getChats(userId: String): Flow<List<Chat>> = callbackFlow {
+        val query = db.collection("chats")
+            .whereArrayContains("participants", userId)
+            .orderBy("lastMessageTime", Query.Direction.DESCENDING)
+
+        val subscription = query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                close(error)
+                return@addSnapshotListener
+            }
+
+            val chats = snapshot?.documents?.mapNotNull { doc ->
+                val chat = doc.toObject(Chat::class.java)
+                chat?.copy(chatId = doc.id)
+            } ?: emptyList()
+
+            trySend(chats)
+
+            for (chat in chats) {
+                if (chat.type == "personal") {
+                    val otherUserId = chat.participants.firstOrNull { it != userId }
+                    if (otherUserId != null) {
+                        db.collection("users").document(otherUserId).get()
+                            .addOnSuccessListener { userDoc ->
+                                val userName = userDoc.getString("name") ?: "Пользователь"
+                                val updatedChat = chat.copy(name = userName)
+                                val updatedChats = chats.map {
+                                    if (it.chatId == updatedChat.chatId) updatedChat else it
+                                }
+                                trySend(updatedChats)
+                            }
+                    }
+                }
+            }
+        }
+
+        awaitClose { subscription.remove() }
     }
 
-    // Поиск пользователей по имени
-    suspend fun searchUsers(query: String): List<UserProfile> {
-        return try {
-            val snapshot = db.collection("users")
-                .whereGreaterThanOrEqualTo("name", query)
-                .whereLessThanOrEqualTo("name", query + "\uf8ff")
-                .limit(20)
-                .get()
-                .await()
-            snapshot.documents.mapNotNull { it.toObject<UserProfile>() }
+    suspend fun markMessageAsDelivered(messageId: String, userId: String) {
+        try {
+            val doc = db.collection("messages").document(messageId).get().await()
+            val senderId = doc.getString("senderId") ?: ""
+            if (senderId != userId) {
+                db.collection("messages").document(messageId)
+                    .update("deliveredTo", FieldValue.arrayUnion(userId))
+                    .await()
+            }
         } catch (e: Exception) {
-            emptyList()
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun getUser(userId: String): UserProfile? {
+        return try {
+            val doc = db.collection("users").document(userId).get().await()
+            doc.toObject(UserProfile::class.java)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    suspend fun getChat(chatId: String): Chat? {
+        return try {
+            val doc = db.collection("chats").document(chatId).get().await()
+            doc.toObject(Chat::class.java)?.copy(chatId = doc.id)
+        } catch (e: Exception) {
+            null
         }
     }
 }

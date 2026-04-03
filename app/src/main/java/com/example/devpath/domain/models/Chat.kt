@@ -10,5 +10,7 @@ data class Chat(
     val createdAt: Timestamp = Timestamp.now(),
     val lastMessage: String = "",
     val lastMessageTime: Timestamp = Timestamp.now(),
-    val createdBy: String = ""
+    val createdBy: String = "",
+    val lastMessageSender: String = "",
+    val typingUsers: List<String> = emptyList()
 )

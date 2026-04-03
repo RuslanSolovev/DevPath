@@ -8,5 +8,6 @@ data class UserProfile(
     val email: String = "",
     val avatarUrl: String? = null,
     val online: Boolean = false,
-    val lastSeen: Timestamp = Timestamp.now()
+    val lastSeen: Timestamp = Timestamp.now(),
+    val createdAt: Timestamp = Timestamp.now()
 )

@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -11,8 +12,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -145,7 +148,6 @@ fun MainScreen() {
                         )
                     }
 
-                    // ✅ Заменяем заглушку на реальный экран чатов
                     composable(MainTab2.CHAT.name) {
                         val userId = Firebase.auth.currentUser?.uid ?: ""
                         ChatsScreen(
@@ -174,12 +176,10 @@ fun MainScreen() {
                         SettingsScreen(onBack = { navController.popBackStack() })
                     }
 
-                    // Экран друзей
                     composable("friends") {
                         FriendsScreen(navController = navController)
                     }
 
-                    // Экран поиска друзей
                     composable("search_friends") {
                         SearchFriendsScreen(navController = navController)
                     }
@@ -207,19 +207,72 @@ fun HomeTabScreen(
 ) {
     val currentUser = Firebase.auth.currentUser
     val viewModel: ProgressViewModel = hiltViewModel()
-    var displayName by remember { mutableStateOf(currentUser?.displayName ?: "") }
-    var isLoading by remember { mutableStateOf(true) }
+    val announcementRepository =
+        remember { com.example.devpath.data.repository.AnnouncementRepository() }
+    val chatRepository = remember { com.example.devpath.data.repository.ChatRepository() }
 
+    var displayName by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(true) }
+    var announcements by remember {
+        mutableStateOf<List<com.example.devpath.domain.models.Announcement>>(
+            emptyList()
+        )
+    }
+    var isLoadingAnnouncements by remember { mutableStateOf(true) }
+    var currentAnnouncementIndex by remember { mutableStateOf(0) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+
+    val OWNER_ID = "lL0cV7ZrlQWKL2kRM1O0bgJgKQ42"
+
+    // Загружаем объявления
+    LaunchedEffect(Unit) {
+        if (currentUser != null) {
+            announcementRepository.getActiveAnnouncements(currentUser.uid).collect { anns ->
+                announcements = anns
+                isLoadingAnnouncements = false
+                if (currentAnnouncementIndex >= anns.size && anns.isNotEmpty()) {
+                    currentAnnouncementIndex = 0
+                }
+            }
+        }
+    }
+
+    // Загружаем имя пользователя из Firestore
     LaunchedEffect(Unit) {
         if (currentUser != null) {
             isLoading = true
             try {
-                val progress = viewModel.progressRepository.loadLocalProgress(currentUser.uid)
-                displayName = progress?.displayName ?: currentUser.displayName ?: ""
+                // ✅ Загружаем профиль из коллекции users
+                val userProfile = chatRepository.getUser(currentUser.uid)
+                displayName = userProfile?.name ?: currentUser.displayName ?: ""
+                println("DEBUG: Загружено имя из Firestore: $displayName")
             } catch (e: Exception) {
                 e.printStackTrace()
+                displayName = currentUser.displayName ?: ""
             } finally {
                 isLoading = false
+            }
+        } else {
+            isLoading = false
+        }
+    }
+
+    // Функция для закрытия объявления
+    fun dismissAnnouncement(announcement: com.example.devpath.domain.models.Announcement) {
+        if (currentUser != null) {
+            viewModel.viewModelScope.launch {
+                announcementRepository.dismissAnnouncement(
+                    announcement.announcementId,
+                    currentUser.uid
+                )
+                val newList =
+                    announcements.filter { it.announcementId != announcement.announcementId }
+                announcements = newList
+                if (newList.isEmpty()) {
+                    currentAnnouncementIndex = 0
+                } else if (currentAnnouncementIndex >= newList.size) {
+                    currentAnnouncementIndex = newList.size - 1
+                }
             }
         }
     }
@@ -230,6 +283,7 @@ fun HomeTabScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.Top
     ) {
+        // Карточка пользователя
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = MaterialTheme.shapes.medium,
@@ -263,7 +317,10 @@ fun HomeTabScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         if (isLoading) {
-                            Text("Загрузка...", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                            Text(
+                                "Загрузка...",
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                            )
                         } else {
                             Text(
                                 text = displayName.ifEmpty { "Пользователь" },
@@ -286,7 +343,222 @@ fun HomeTabScreen(
                 }
             }
         }
+
+        // Кнопка создания объявления (только для владельца)
+        if (currentUser?.uid == OWNER_ID) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = { showCreateDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondary
+                )
+            ) {
+                Icon(Icons.Default.Announcement, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Создать объявление")
+            }
+        }
+
+        // Диалог создания объявления
+        if (showCreateDialog) {
+            CreateAnnouncementDialog(
+                onDismiss = {
+                    showCreateDialog = false
+                },
+                onCreate = { title, message ->
+                    viewModel.viewModelScope.launch {
+                        announcementRepository.createAnnouncement(title, message, currentUser!!.uid)
+                        showCreateDialog = false
+                    }
+                }
+            )
+        }
+
+        // Баннер с объявлениями (карусель)
+        if (!isLoadingAnnouncements && announcements.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Announcement,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            if (currentAnnouncementIndex < announcements.size) {
+                                Text(
+                                    text = announcements[currentAnnouncementIndex].title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                if (currentAnnouncementIndex < announcements.size) {
+                                    dismissAnnouncement(announcements[currentAnnouncementIndex])
+                                }
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (currentAnnouncementIndex < announcements.size) {
+                        Text(
+                            text = announcements[currentAnnouncementIndex].message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+
+                    if (announcements.size > 1) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    currentAnnouncementIndex = if (currentAnnouncementIndex > 0)
+                                        currentAnnouncementIndex - 1
+                                    else
+                                        announcements.size - 1
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ChevronLeft,
+                                    contentDescription = "Предыдущее",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            ) {
+                                announcements.indices.forEach { index ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(if (currentAnnouncementIndex == index) 8.dp else 6.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (currentAnnouncementIndex == index)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(
+                                                        alpha = 0.5f
+                                                    )
+                                            )
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    currentAnnouncementIndex =
+                                        if (currentAnnouncementIndex < announcements.size - 1)
+                                            currentAnnouncementIndex + 1
+                                        else
+                                            0
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    contentDescription = "Следующее",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+@Composable
+fun CreateAnnouncementDialog(
+    onDismiss: () -> Unit,
+    onCreate: (title: String, message: String) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Создать объявление") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Заголовок") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = message,
+                    onValueChange = { message = it },
+                    label = { Text("Текст объявления") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (title.isNotBlank() && message.isNotBlank()) {
+                        onCreate(title, message)
+                        onDismiss()
+                    }
+                }
+            ) {
+                Text("Опубликовать")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
 }
 
 @Composable
