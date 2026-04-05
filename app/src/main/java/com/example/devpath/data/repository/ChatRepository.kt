@@ -342,6 +342,7 @@ class ChatRepository @Inject constructor() {
             query = query.startAfter(lastMessage.timestamp)
         }
 
+        // ✅ Используем addSnapshotListener для реального времени
         val subscription = query.addSnapshotListener { snapshot, error ->
             if (error != null) {
                 close(error)
@@ -357,6 +358,7 @@ class ChatRepository @Inject constructor() {
         awaitClose { subscription.remove() }
     }
 
+    // Загрузить следующие сообщения (однократно)
     suspend fun loadMoreMessages(chatId: String, lastMessage: Message, limit: Long = 30): List<Message> {
         return try {
             val query = db.collection("messages")
@@ -365,7 +367,7 @@ class ChatRepository @Inject constructor() {
                 .startAfter(lastMessage.timestamp)
                 .limit(limit)
                 .get()
-                .await()
+                .await()  // ✅ Для пагинации используем get() – однократная загрузка
 
             query.documents.mapNotNull { doc ->
                 val message = doc.toObject(Message::class.java)

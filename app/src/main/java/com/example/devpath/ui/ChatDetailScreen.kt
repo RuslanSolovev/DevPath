@@ -55,12 +55,16 @@ fun ChatDetailScreen(
     var shouldScrollToBottom by remember { mutableStateOf(true) }
     var previousMessagesCount by remember { mutableStateOf(0) }
 
+    // Флаг для отслеживания, была ли уже загрузка
+    var isInitialLoad by remember { mutableStateOf(true) }
+
     // Загружаем первые сообщения и общее количество
     LaunchedEffect(chatId) {
         viewModel.loadMessages(chatId, reset = true)
         viewModel.loadChatName(chatId, currentUserId)
         viewModel.loadTotalMessagesCount(chatId)
         shouldScrollToBottom = true
+        isInitialLoad = false
     }
 
     // Наблюдаем за статусом онлайн собеседника
@@ -88,7 +92,7 @@ fun ChatDetailScreen(
 
     // Загружаем старые сообщения при скролле вверх
     LaunchedEffect(listState.firstVisibleItemIndex) {
-        if (!isLoadingMore && hasMoreMessages && listState.firstVisibleItemIndex == 0 && messages.isNotEmpty()) {
+        if (!isLoadingMore && hasMoreMessages && listState.firstVisibleItemIndex == 0 && messages.isNotEmpty() && !isInitialLoad) {
             val currentScrollPosition = listState.firstVisibleItemScrollOffset
             previousMessagesCount = messages.size
             viewModel.loadMoreMessages(chatId)
@@ -104,9 +108,9 @@ fun ChatDetailScreen(
         }
     }
 
-    // Новые сообщения – скроллим к ним
+    // Новые сообщения – скроллим к ним (только если сообщение отправили мы)
     LaunchedEffect(messages.size) {
-        if (shouldScrollToBottom && messages.isNotEmpty() && !isLoadingMessages && !isLoadingMore) {
+        if (shouldScrollToBottom && messages.isNotEmpty() && !isLoadingMessages && !isLoadingMore && !isInitialLoad) {
             coroutineScope.launch {
                 listState.animateScrollToItem(messages.size - 1)
             }
@@ -118,8 +122,15 @@ fun ChatDetailScreen(
         if (messages.isNotEmpty()) {
             val visibleMessages = listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }
             visibleMessages.forEach { messageId ->
-                viewModel.markMessageAsDelivered(messageId, currentUserId)  // сначала доставка
-                viewModel.markMessageAsRead(messageId, currentUserId)       // потом прочтение
+                val message = messages.find { it.messageId == messageId }
+                if (message != null && message.senderId != currentUserId) {
+                    if (!message.deliveredTo.contains(currentUserId)) {
+                        viewModel.markMessageAsDelivered(messageId, currentUserId)
+                    }
+                    if (!message.readBy.contains(currentUserId)) {
+                        viewModel.markMessageAsRead(messageId, currentUserId)
+                    }
+                }
             }
         }
     }
@@ -405,6 +416,7 @@ fun ChatDetailScreen(
                             if (editingMessage != null) {
                                 viewModel.editMessage(editingMessage!!.messageId, inputText)
                                 inputText = ""
+                                viewModel.setEditingMessage(null)
                             } else {
                                 shouldScrollToBottom = true
                                 viewModel.sendMessage(
@@ -609,7 +621,6 @@ fun MessageBubble(
                         if (isMine) {
                             when {
                                 isRead && message.readBy.size > 1 -> {
-                                    // ✅ Прочитано (две синие галочки)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
                                             Icons.Default.DoneAll,
@@ -620,7 +631,6 @@ fun MessageBubble(
                                     }
                                 }
                                 isDelivered && message.deliveredTo.size > 1 -> {
-                                    // ✅ Доставлено получателю (две серые галочки)
                                     Icon(
                                         Icons.Default.DoneAll,
                                         contentDescription = "Доставлено",
@@ -629,7 +639,6 @@ fun MessageBubble(
                                     )
                                 }
                                 message.deliveredTo.isNotEmpty() -> {
-                                    // ✅ Отправлено на сервер (одна галочка)
                                     Icon(
                                         Icons.Default.Done,
                                         contentDescription = "Отправлено",
@@ -638,7 +647,6 @@ fun MessageBubble(
                                     )
                                 }
                                 else -> {
-                                    // ⏳ Отправляется (индикатор загрузки)
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(12.dp),
                                         strokeWidth = 1.dp

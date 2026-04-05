@@ -166,17 +166,18 @@ class ChatsViewModel @Inject constructor(
                 _hasMoreMessages.value = true
             }
 
-            val messages = chatRepository.getMessages(chatId, MESSAGE_PAGE_SIZE, lastLoadedMessage).first()
+            chatRepository.getMessages(chatId, MESSAGE_PAGE_SIZE, if (reset) null else lastLoadedMessage)
+                .collect { messages ->
+                    if (reset) {
+                        _messages.value = messages.reversed()
+                    } else {
+                        _messages.value = messages.reversed() + _messages.value
+                    }
 
-            if (reset) {
-                _messages.value = messages.reversed()
-            } else {
-                _messages.value = messages.reversed() + _messages.value
-            }
-
-            lastLoadedMessage = messages.lastOrNull()
-            _hasMoreMessages.value = messages.size.toLong() == MESSAGE_PAGE_SIZE
-            _isLoadingMessages.value = false
+                    lastLoadedMessage = messages.lastOrNull()
+                    _hasMoreMessages.value = messages.size.toLong() == MESSAGE_PAGE_SIZE
+                    _isLoadingMessages.value = false
+                }
         }
     }
 
