@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -70,12 +71,11 @@ fun MainScreen() {
                 currentRoute != "profile" &&
                 currentRoute != "settings"
 
-        // ✅ Отслеживаем активность пользователя
         val currentUserId = Firebase.auth.currentUser?.uid ?: ""
 
         DisposableEffect(Unit) {
             if (currentUserId.isNotEmpty()) {
-                chatViewModel.updateUserLastActive(currentUserId)   // обновляем сразу
+                chatViewModel.updateUserLastActive(currentUserId)
             }
             val job = CoroutineScope(Dispatchers.IO).launch {
                 while (true) {
@@ -88,7 +88,6 @@ fun MainScreen() {
             }
             onDispose {
                 job.cancel()
-                // НЕ вызываем updateUserOnlineStatus(false)
             }
         }
 
@@ -254,13 +253,12 @@ fun HomeTabScreen(
     var currentAnnouncementIndex by remember { mutableStateOf(0) }
     var showCreateDialog by remember { mutableStateOf(false) }
 
-    val OWNER_ID = "lL0cV7ZrlQWKL2kRM1O0bgJgKQ42"
+    val OWNER_ID = "nPX20T5lVTVQzjLTINkLp0f9xxI2"
 
-    // Загружаем объявления
     LaunchedEffect(Unit) {
         if (currentUser != null) {
             announcementRepository.getActiveAnnouncements(currentUser.uid).collect { anns ->
-                announcements = anns
+                announcements = anns.sortedByDescending { it.priority }
                 isLoadingAnnouncements = false
                 if (currentAnnouncementIndex >= anns.size && anns.isNotEmpty()) {
                     currentAnnouncementIndex = 0
@@ -269,12 +267,10 @@ fun HomeTabScreen(
         }
     }
 
-    // Загружаем имя пользователя из Firestore
     LaunchedEffect(Unit) {
         if (currentUser != null) {
             isLoading = true
             try {
-                // ✅ Загружаем профиль из коллекции users
                 val userProfile = chatRepository.getUser(currentUser.uid)
                 displayName = userProfile?.name ?: currentUser.displayName ?: ""
                 println("DEBUG: Загружено имя из Firestore: $displayName")
@@ -289,7 +285,6 @@ fun HomeTabScreen(
         }
     }
 
-    // Функция для закрытия объявления
     fun dismissAnnouncement(announcement: com.example.devpath.domain.models.Announcement) {
         if (currentUser != null) {
             viewModel.viewModelScope.launch {
@@ -343,7 +338,7 @@ fun HomeTabScreen(
                         Text(
                             text = if (!isLoading) displayName.take(2).uppercase() else "?",
                             color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                            fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(modifier = Modifier.width(12.dp))
@@ -351,12 +346,12 @@ fun HomeTabScreen(
                         if (isLoading) {
                             Text(
                                 "Загрузка...",
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                fontWeight = FontWeight.Bold
                             )
                         } else {
                             Text(
                                 text = displayName.ifEmpty { "Пользователь" },
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                fontWeight = FontWeight.Bold
                             )
                         }
                         Text(
@@ -386,7 +381,7 @@ fun HomeTabScreen(
                     containerColor = MaterialTheme.colorScheme.secondary
                 )
             ) {
-                Icon(Icons.Default.Announcement, contentDescription = null)
+                Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Создать объявление")
             }
@@ -394,13 +389,19 @@ fun HomeTabScreen(
 
         // Диалог создания объявления
         if (showCreateDialog) {
-            CreateAnnouncementDialog(
-                onDismiss = {
-                    showCreateDialog = false
-                },
-                onCreate = { title, message ->
+            CreateAnnouncementDialogModern(
+                onDismiss = { showCreateDialog = false },
+                onCreate = { title, message, type, priority, actionText, actionUrl ->
                     viewModel.viewModelScope.launch {
-                        announcementRepository.createAnnouncement(title, message, currentUser!!.uid)
+                        announcementRepository.createAnnouncement(
+                            title = title,
+                            message = message,
+                            ownerId = currentUser!!.uid,
+                            type = type,
+                            priority = priority,
+                            actionText = actionText,
+                            actionUrl = actionUrl
+                        )
                         showCreateDialog = false
                     }
                 }
@@ -410,130 +411,96 @@ fun HomeTabScreen(
         // Баннер с объявлениями (карусель)
         if (!isLoadingAnnouncements && announcements.isNotEmpty()) {
             Spacer(modifier = Modifier.height(12.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp, max = 200.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
+                when (announcements[currentAnnouncementIndex].type) {
+                    "warning" -> AnnouncementCardWarning(
+                        announcement = announcements[currentAnnouncementIndex],
+                        onDismiss = { dismissAnnouncement(announcements[currentAnnouncementIndex]) }
+                    )
+                    "success" -> AnnouncementCardSuccess(
+                        announcement = announcements[currentAnnouncementIndex],
+                        onDismiss = { dismissAnnouncement(announcements[currentAnnouncementIndex]) }
+                    )
+                    "event" -> AnnouncementCardEvent(
+                        announcement = announcements[currentAnnouncementIndex],
+                        onDismiss = { dismissAnnouncement(announcements[currentAnnouncementIndex]) }
+                    )
+                    "update" -> AnnouncementCardUpdate(
+                        announcement = announcements[currentAnnouncementIndex],
+                        onDismiss = { dismissAnnouncement(announcements[currentAnnouncementIndex]) }
+                    )
+                    else -> AnnouncementCardInfo(
+                        announcement = announcements[currentAnnouncementIndex],
+                        onDismiss = { dismissAnnouncement(announcements[currentAnnouncementIndex]) }
+                    )
+                }
+
+                if (announcements.size > 1) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.Top,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Announcement,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            if (currentAnnouncementIndex < announcements.size) {
-                                Text(
-                                    text = announcements[currentAnnouncementIndex].title,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
                         IconButton(
                             onClick = {
-                                if (currentAnnouncementIndex < announcements.size) {
-                                    dismissAnnouncement(announcements[currentAnnouncementIndex])
-                                }
+                                currentAnnouncementIndex = if (currentAnnouncementIndex > 0)
+                                    currentAnnouncementIndex - 1
+                                else
+                                    announcements.size - 1
                             },
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Закрыть",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                Icons.Default.ChevronLeft,
+                                contentDescription = "Предыдущее",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (currentAnnouncementIndex < announcements.size) {
-                        Text(
-                            text = announcements[currentAnnouncementIndex].message,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-
-                    if (announcements.size > 1) {
-                        Spacer(modifier = Modifier.height(12.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp)
                         ) {
-                            IconButton(
-                                onClick = {
-                                    currentAnnouncementIndex = if (currentAnnouncementIndex > 0)
-                                        currentAnnouncementIndex - 1
+                            announcements.indices.forEach { index ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (currentAnnouncementIndex == index) 8.dp else 6.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (currentAnnouncementIndex == index)
+                                                MaterialTheme.colorScheme.primary
+                                            else
+                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                        )
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = {
+                                currentAnnouncementIndex =
+                                    if (currentAnnouncementIndex < announcements.size - 1)
+                                        currentAnnouncementIndex + 1
                                     else
-                                        announcements.size - 1
-                                },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.ChevronLeft,
-                                    contentDescription = "Предыдущее",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(horizontal = 8.dp)
-                            ) {
-                                announcements.indices.forEach { index ->
-                                    Box(
-                                        modifier = Modifier
-                                            .size(if (currentAnnouncementIndex == index) 8.dp else 6.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (currentAnnouncementIndex == index)
-                                                    MaterialTheme.colorScheme.primary
-                                                else
-                                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(
-                                                        alpha = 0.5f
-                                                    )
-                                            )
-                                    )
-                                }
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    currentAnnouncementIndex =
-                                        if (currentAnnouncementIndex < announcements.size - 1)
-                                            currentAnnouncementIndex + 1
-                                        else
-                                            0
-                                },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.ChevronRight,
-                                    contentDescription = "Следующее",
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+                                        0
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = "Следующее",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -543,45 +510,158 @@ fun HomeTabScreen(
 }
 
 @Composable
-fun CreateAnnouncementDialog(
+fun CreateAnnouncementDialogModern(
     onDismiss: () -> Unit,
-    onCreate: (title: String, message: String) -> Unit
+    onCreate: (title: String, message: String, type: String, priority: Int, actionText: String?, actionUrl: String?) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf("info") }
+    var selectedPriority by remember { mutableStateOf(1) }
+    var showAdvanced by remember { mutableStateOf(false) }
+    var actionText by remember { mutableStateOf("") }
+    var actionUrl by remember { mutableStateOf("") }
+
+    val types = listOf(
+        "info" to "ℹ️ Информация",
+        "warning" to "⚠️ Предупреждение",
+        "success" to "✅ Успех",
+        "event" to "📅 Событие",
+        "update" to "🔄 Обновление"
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Создать объявление") },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Announcement, contentDescription = null, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Создать объявление", style = MaterialTheme.typography.titleLarge)
+            }
+        },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Заголовок") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Title, contentDescription = null) }
                 )
+
                 OutlinedTextField(
                     value = message,
                     onValueChange = { message = it },
                     label = { Text("Текст объявления") },
                     modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
+                    minLines = 3,
+                    leadingIcon = { Icon(Icons.Default.Description, contentDescription = null) }
                 )
+
+                Text("Тип объявления", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    types.forEach { (type, label) ->
+                        FilterChip(
+                            selected = selectedType == type,
+                            onClick = { selectedType = type },
+                            label = { Text(label) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Text("Приоритет (1-5)", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    (1..5).forEach { priority ->
+                        FilterChip(
+                            selected = selectedPriority == priority,
+                            onClick = { selectedPriority = priority },
+                            label = { Text(priority.toString()) },
+                            modifier = Modifier.weight(1f),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = when (priority) {
+                                    5 -> MaterialTheme.colorScheme.error
+                                    4 -> MaterialTheme.colorScheme.errorContainer
+                                    else -> MaterialTheme.colorScheme.primaryContainer
+                                }
+                            )
+                        )
+                    }
+                }
+
+                TextButton(
+                    onClick = { showAdvanced = !showAdvanced },
+                    modifier = Modifier.align(Alignment.Start)
+                ) {
+                    Icon(
+                        if (showAdvanced) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = null
+                    )
+                    Text(if (showAdvanced) "Скрыть доп. настройки" else "Дополнительные настройки")
+                }
+
+                if (showAdvanced) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = actionText,
+                                onValueChange = { actionText = it },
+                                label = { Text("Текст кнопки действия") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                placeholder = { Text("Например: Узнать больше") }
+                            )
+
+                            OutlinedTextField(
+                                value = actionUrl,
+                                onValueChange = { actionUrl = it },
+                                label = { Text("Ссылка (URL)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                placeholder = { Text("https://...") }
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
-            TextButton(
+            Button(
                 onClick = {
                     if (title.isNotBlank() && message.isNotBlank()) {
-                        onCreate(title, message)
-                        onDismiss()
+                        onCreate(
+                            title,
+                            message,
+                            selectedType,
+                            selectedPriority,
+                            actionText.takeIf { it.isNotBlank() },
+                            actionUrl.takeIf { it.isNotBlank() }
+                        )
                     }
-                }
+                },
+                enabled = title.isNotBlank() && message.isNotBlank()
             ) {
+                Icon(Icons.Default.Send, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
                 Text("Опубликовать")
             }
         },
@@ -589,8 +669,349 @@ fun CreateAnnouncementDialog(
             TextButton(onClick = onDismiss) {
                 Text("Отмена")
             }
-        }
+        },
+        shape = RoundedCornerShape(20.dp)
     )
+}
+
+@Composable
+fun AnnouncementCardInfo(
+    announcement: com.example.devpath.domain.models.Announcement,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = announcement.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = announcement.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+fun AnnouncementCardWarning(
+    announcement: com.example.devpath.domain.models.Announcement,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = announcement.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = announcement.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
+}
+
+@Composable
+fun AnnouncementCardSuccess(
+    announcement: com.example.devpath.domain.models.Announcement,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFF4CAF50).copy(alpha = 0.1f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = Color(0xFF4CAF50).copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = announcement.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF4CAF50)
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        modifier = Modifier.size(18.dp),
+                        tint = Color(0xFF4CAF50)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = announcement.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFF2E7D32)
+            )
+        }
+    }
+}
+
+@Composable
+fun AnnouncementCardEvent(
+    announcement: com.example.devpath.domain.models.Announcement,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.95f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Event,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = announcement.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = announcement.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+    }
+}
+
+@Composable
+fun AnnouncementCardUpdate(
+    announcement: com.example.devpath.domain.models.Announcement,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.95f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.SystemUpdate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = announcement.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = announcement.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+        }
+    }
 }
 
 @Composable
@@ -619,14 +1040,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             Text(
                 text = "Настройки",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                fontWeight = FontWeight.Bold
             )
         }
 
         Text(
             text = "Тема приложения",
             style = MaterialTheme.typography.titleMedium,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+            fontWeight = FontWeight.Bold
         )
 
         ThemeOption(

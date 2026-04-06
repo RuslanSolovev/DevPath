@@ -16,10 +16,10 @@ import javax.inject.Singleton
 class AnnouncementRepository @Inject constructor() {
     private val db: FirebaseFirestore = Firebase.firestore
 
-    // Получить активные объявления (не закрытые пользователем)
     fun getActiveAnnouncements(userId: String): Flow<List<Announcement>> = callbackFlow {
         val query = db.collection("announcements")
-            .whereEqualTo("active", true)  // ← было "isActive", стало "active"
+            .whereEqualTo("active", true)
+            .orderBy("priority", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
 
         val subscription = query.addSnapshotListener { snapshot, error ->
@@ -33,7 +33,6 @@ class AnnouncementRepository @Inject constructor() {
                 announcement?.copy(announcementId = doc.id)
             } ?: emptyList()
 
-            // Фильтруем только те, которые пользователь не закрыл
             val activeForUser = allAnnouncements.filter { !it.dismissedBy.contains(userId) }
             trySend(activeForUser)
         }
@@ -41,16 +40,31 @@ class AnnouncementRepository @Inject constructor() {
         awaitClose { subscription.remove() }
     }
 
-    // Создать объявление (только для владельца)
-    suspend fun createAnnouncement(title: String, message: String, ownerId: String): Boolean {
+    suspend fun createAnnouncement(
+        title: String,
+        message: String,
+        ownerId: String,
+        type: String = "info",
+        priority: Int = 1,
+        imageUrl: String? = null,
+        actionUrl: String? = null,
+        actionText: String? = null,
+        expiresAt: com.google.firebase.Timestamp? = null
+    ): Boolean {
         return try {
             val announcement = Announcement(
                 title = title,
                 message = message,
                 createdAt = com.google.firebase.Timestamp.now(),
                 createdBy = ownerId,
-                active = true,  // ← было isActive, стало active
-                dismissedBy = emptyList()
+                active = true,
+                dismissedBy = emptyList(),
+                type = type,
+                priority = priority,
+                imageUrl = imageUrl,
+                actionUrl = actionUrl,
+                actionText = actionText,
+                expiresAt = expiresAt
             )
             db.collection("announcements").add(announcement).await()
             true
@@ -60,7 +74,6 @@ class AnnouncementRepository @Inject constructor() {
         }
     }
 
-    // Закрыть объявление (добавить пользователя в dismissedBy)
     suspend fun dismissAnnouncement(announcementId: String, userId: String): Boolean {
         return try {
             db.collection("announcements").document(announcementId)
@@ -73,7 +86,6 @@ class AnnouncementRepository @Inject constructor() {
         }
     }
 
-    // Удалить объявление (для владельца)
     suspend fun deleteAnnouncement(announcementId: String): Boolean {
         return try {
             db.collection("announcements").document(announcementId).delete().await()
@@ -83,7 +95,6 @@ class AnnouncementRepository @Inject constructor() {
         }
     }
 
-    // Получить все объявления (для владельца)
     suspend fun getAllAnnouncements(): List<Announcement> {
         return try {
             val snapshot = db.collection("announcements")
@@ -96,6 +107,17 @@ class AnnouncementRepository @Inject constructor() {
             }
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    suspend fun updateAnnouncementPriority(announcementId: String, priority: Int): Boolean {
+        return try {
+            db.collection("announcements").document(announcementId)
+                .update("priority", priority)
+                .await()
+            true
+        } catch (e: Exception) {
+            false
         }
     }
 }
