@@ -12,6 +12,9 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -268,6 +271,57 @@ class ChatRepository @Inject constructor() {
         }
     }
 
+    suspend fun updateUserLastActive(userId: String) {
+        try {
+            db.collection("users").document(userId)
+                .update(
+                    mapOf(
+                        "lastActiveInApp" to com.google.firebase.Timestamp.now(),
+                        "lastSeen" to com.google.firebase.Timestamp.now()
+                    )
+                )
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    suspend fun getUserLastActiveFormatted(userId: String): String {
+        return try {
+            println("DEBUG: getUserLastActiveFormatted - запрос для userId=$userId")
+            val doc = db.collection("users").document(userId).get().await()
+            val lastActive = doc.getTimestamp("lastActiveInApp") ?: doc.getTimestamp("lastSeen")
+            println("DEBUG: getUserLastActiveFormatted - timestamp=$lastActive")
+            if (lastActive != null) {
+                val formatted = formatLastActive(lastActive.toDate())
+                println("DEBUG: getUserLastActiveFormatted - formatted='$formatted'")
+                formatted
+            } else {
+                println("DEBUG: getUserLastActiveFormatted - timestamp null")
+                "недавно"
+            }
+        } catch (e: Exception) {
+            println("DEBUG: getUserLastActiveFormatted - ошибка: ${e.message}")
+            "недавно"
+        }
+    }
+
+    private fun formatLastActive(date: Date): String {
+        val now = Date()
+        val diff = now.time - date.time
+
+        return when {
+            diff < 60_000 -> "Только что"
+            diff < 3_600_000 -> "${diff / 60_000} мин. назад"
+            diff < 86_400_000 -> "${diff / 3_600_000} ч. назад"
+            diff < 604_800_000 -> "${diff / 86_400_000} д. назад"
+            else -> {
+                val formatter = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+                formatter.format(date)
+            }
+        }
+    }
+
     suspend fun createPersonalChat(userId1: String, userId2: String): String? {
         return try {
             val chat = Chat(
@@ -342,7 +396,6 @@ class ChatRepository @Inject constructor() {
             query = query.startAfter(lastMessage.timestamp)
         }
 
-        // ✅ Используем addSnapshotListener для реального времени
         val subscription = query.addSnapshotListener { snapshot, error ->
             if (error != null) {
                 close(error)
@@ -358,7 +411,6 @@ class ChatRepository @Inject constructor() {
         awaitClose { subscription.remove() }
     }
 
-    // Загрузить следующие сообщения (однократно)
     suspend fun loadMoreMessages(chatId: String, lastMessage: Message, limit: Long = 30): List<Message> {
         return try {
             val query = db.collection("messages")
@@ -367,7 +419,7 @@ class ChatRepository @Inject constructor() {
                 .startAfter(lastMessage.timestamp)
                 .limit(limit)
                 .get()
-                .await()  // ✅ Для пагинации используем get() – однократная загрузка
+                .await()
 
             query.documents.mapNotNull { doc ->
                 val message = doc.toObject(Message::class.java)
@@ -378,30 +430,7 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    suspend fun updateUserOnlineStatus(userId: String, isOnline: Boolean) {
-        try {
-            db.collection("users").document(userId)
-                .update(
-                    mapOf(
-                        "online" to isOnline,
-                        "lastSeen" to com.google.firebase.Timestamp.now()
-                    )
-                )
-                .await()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    suspend fun getUserOnlineStatus(userId: String): Boolean {
-        return try {
-            val doc = db.collection("users").document(userId).get().await()
-            doc.getBoolean("online") ?: false
-        } catch (e: Exception) {
-            false
-        }
-    }
-
+    // Новая реализация observeUserOnlineStatus - вычисляет онлайн по lastActiveInApp
     fun observeUserOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
         val subscription = db.collection("users").document(userId)
             .addSnapshotListener { snapshot, error ->
@@ -409,7 +438,9 @@ class ChatRepository @Inject constructor() {
                     close(error)
                     return@addSnapshotListener
                 }
-                val isOnline = snapshot?.getBoolean("online") ?: false
+                val lastActive = snapshot?.getTimestamp("lastActiveInApp")
+                val isOnline = lastActive != null &&
+                        (System.currentTimeMillis() - lastActive.toDate().time) < 120_000 // 2 минуты
                 trySend(isOnline)
             }
         awaitClose { subscription.remove() }
@@ -512,6 +543,9 @@ class ChatRepository @Inject constructor() {
 
     suspend fun sendMessage(chatId: String, senderId: String, text: String, replyToId: String = "", replyToText: String = "", replyToSenderName: String = ""): Boolean {
         return try {
+            // Обновляем активность перед отправкой
+            updateUserLastActive(senderId)
+
             val sender = getUser(senderId)
             val senderName = sender?.name ?: "Пользователь"
 

@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -81,6 +80,41 @@ class ChatsViewModel @Inject constructor(
 
     private var typingTimeoutJob: kotlinx.coroutines.Job? = null
 
+    private val _userLastActive = MutableStateFlow("")
+    val userLastActive: StateFlow<String> = _userLastActive.asStateFlow()
+
+    fun observeUserLastActive(userId: String) {
+        viewModelScope.launch {
+            println("DEBUG: observeUserLastActive - начало, userId=$userId")
+            try {
+                val lastActive = chatRepository.getUserLastActiveFormatted(userId)
+                println("DEBUG: observeUserLastActive - получено значение: '$lastActive'")
+                _userLastActive.value = lastActive
+                println("DEBUG: observeUserLastActive - _userLastActive установлено в: ${_userLastActive.value}")
+            } catch (e: Exception) {
+                println("DEBUG: observeUserLastActive - ошибка: ${e.message}")
+            }
+
+            chatRepository.observeUserOnlineStatus(userId).collect { isOnline ->
+                println("DEBUG: observeUserLastActive - isOnline=$isOnline")
+                if (!isOnline) {
+                    val updatedLastActive = chatRepository.getUserLastActiveFormatted(userId)
+                    println("DEBUG: observeUserLastActive - updatedLastActive='$updatedLastActive'")
+                    _userLastActive.value = updatedLastActive
+                } else {
+                    println("DEBUG: observeUserLastActive - пользователь онлайн, очищаем")
+                    _userLastActive.value = ""
+                }
+            }
+        }
+    }
+
+    fun updateUserLastActive(userId: String) {
+        viewModelScope.launch {
+            chatRepository.updateUserLastActive(userId)
+        }
+    }
+
     fun getOtherParticipantId(chatId: String, currentUserId: String): String? {
         val chat = _chats.value.find { it.chatId == chatId }
         return chat?.participants?.firstOrNull { it != currentUserId }
@@ -91,12 +125,6 @@ class ChatsViewModel @Inject constructor(
             chatRepository.observeUserOnlineStatus(friendId).collect { isOnline ->
                 _isUserOnline.value = isOnline
             }
-        }
-    }
-
-    fun updateUserOnlineStatus(userId: String, isOnline: Boolean) {
-        viewModelScope.launch {
-            chatRepository.updateUserOnlineStatus(userId, isOnline)
         }
     }
 
@@ -287,6 +315,9 @@ class ChatsViewModel @Inject constructor(
         _totalMessagesCount.value += 1
 
         viewModelScope.launch {
+            // Обновляем активность перед отправкой
+            updateUserLastActive(senderId)
+
             val success = chatRepository.sendMessage(chatId, senderId, text, replyToId, replyToText, replyToSenderName)
             if (success) {
                 _messages.value = _messages.value.map { message ->
@@ -324,7 +355,7 @@ class ChatsViewModel @Inject constructor(
         viewModelScope.launch {
             val chat = chatRepository.createOrGetChat(currentUserId, friendId)
             chat?.let {
-                navController.navigate("chat_detail/${it.chatId}")
+                navController.navigate("chat_detail/${it.chatId}/${friendId}")
             }
         }
     }

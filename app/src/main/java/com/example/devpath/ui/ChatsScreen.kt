@@ -7,17 +7,25 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.example.devpath.ui.viewmodel.ChatsViewModel
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,7 +35,7 @@ fun ChatsScreen(
 ) {
     val viewModel: ChatsViewModel = hiltViewModel()
     val chats by viewModel.chats.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()  // ← берём из ViewModel
+    val isLoading by viewModel.isLoading.collectAsState()
 
     var showDeleteDialog by remember { mutableStateOf(false) }
     var chatToDelete by remember { mutableStateOf<com.example.devpath.domain.models.Chat?>(null) }
@@ -38,13 +46,59 @@ fun ChatsScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Чаты") },
-                actions = {
-                    IconButton(onClick = { navController.navigate("friends") }) {
-                        Icon(Icons.Default.People, contentDescription = "Друзья")
+            TopAppBar(
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primary,
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.Chat,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Text(
+                            "Чаты",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
                     }
-                }
+                },
+                actions = {
+                    IconButton(
+                        onClick = { navController.navigate("friends") },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    ) {
+                        Icon(
+                            Icons.Outlined.People,
+                            contentDescription = "Друзья",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp)
+                )
             )
         }
     ) { paddingValues ->
@@ -52,10 +106,17 @@ fun ChatsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.background,
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        )
+                    )
+                )
         ) {
             when {
                 isLoading -> {
-                    // Показываем прогресс бар во время загрузки
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -66,7 +127,8 @@ fun ChatsScreen(
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(48.dp),
-                                strokeWidth = 3.dp
+                                strokeWidth = 3.dp,
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Text(
                                 text = "Загрузка чатов...",
@@ -77,7 +139,6 @@ fun ChatsScreen(
                     }
                 }
                 chats.isEmpty() -> {
-                    // Пустое состояние (показываем только когда загрузка завершена и чатов нет)
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -86,16 +147,25 @@ fun ChatsScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            Icon(
-                                Icons.Default.Chat,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                            )
+                            Surface(
+                                modifier = Modifier.size(80.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Outlined.Chat,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(40.dp),
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
                             Text(
                                 text = "У вас пока нет чатов",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = "Добавьте друзей, чтобы начать общение",
@@ -104,9 +174,13 @@ fun ChatsScreen(
                             )
                             Button(
                                 onClick = { navController.navigate("friends") },
-                                modifier = Modifier.padding(top = 8.dp)
+                                modifier = Modifier.padding(top = 8.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
                             ) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = null)
+                                Icon(Icons.Outlined.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Найти друзей")
                             }
@@ -116,14 +190,16 @@ fun ChatsScreen(
                 else -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(8.dp)
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(chats, key = { it.chatId }) { chat ->
-                            ChatItem(
+                            ChatItemModern(
                                 chat = chat,
                                 onClick = {
                                     if (chat.chatId.isNotBlank()) {
-                                        navController.navigate("chat_detail/${chat.chatId}")
+                                        val friendId = chat.participants.firstOrNull { it != userId }
+                                        navController.navigate("chat_detail/${chat.chatId}/${friendId ?: ""}")
                                     }
                                 },
                                 onLongClick = {
@@ -131,7 +207,6 @@ fun ChatsScreen(
                                     showDeleteDialog = true
                                 }
                             )
-                            Divider()
                         }
                     }
                 }
@@ -139,15 +214,25 @@ fun ChatsScreen(
         }
     }
 
-    // Диалог подтверждения удаления
     if (showDeleteDialog && chatToDelete != null) {
         AlertDialog(
             onDismissRequest = {
                 showDeleteDialog = false
                 chatToDelete = null
             },
-            title = { Text("Удалить чат") },
-            text = { Text("Вы уверены, что хотите удалить этот чат? Все сообщения будут потеряны.") },
+            title = {
+                Text(
+                    "Удалить чат",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                Text(
+                    "Вы уверены, что хотите удалить этот чат? Все сообщения будут потеряны.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -173,14 +258,15 @@ fun ChatsScreen(
                 ) {
                     Text("Отмена")
                 }
-            }
+            },
+            shape = RoundedCornerShape(16.dp)
         )
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ChatItem(
+fun ChatItemModern(
     chat: com.example.devpath.domain.models.Chat,
     onClick: () -> Unit,
     onLongClick: () -> Unit
@@ -191,9 +277,12 @@ fun ChatItem(
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
-            )
-            .padding(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier
@@ -201,27 +290,37 @@ fun ChatItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Аватар чата
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                            )
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    if (chat.type == "personal") Icons.Default.Person else Icons.Default.Group,
+                    if (chat.type == "personal") Icons.Outlined.Person else Icons.Outlined.Group,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(28.dp)
                 )
             }
 
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Информация о чате
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // Название чата
                 Text(
                     text = when {
                         chat.type == "personal" -> {
@@ -231,10 +330,13 @@ fun ChatItem(
                         else -> "Групповой чат"
                     },
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
-                // ✅ Показываем отправителя и текст сообщения
+                // Последнее сообщение с отправителем
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -242,9 +344,14 @@ fun ChatItem(
                 ) {
                     if (chat.lastMessageSender.isNotEmpty()) {
                         Text(
-                            text = "${chat.lastMessageSender}: ",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                            text = chat.lastMessageSender,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = ":",
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -253,17 +360,27 @@ fun ChatItem(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
                 }
             }
 
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // Стрелка перехода
+            Surface(
+                modifier = Modifier.size(32.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Outlined.ChevronRight,
+                        contentDescription = "Открыть",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
     }
 }

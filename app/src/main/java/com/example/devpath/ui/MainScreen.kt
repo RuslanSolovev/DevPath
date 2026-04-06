@@ -28,9 +28,12 @@ import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 
 enum class MainTab2(val title: String) {
     HOME("Главная"),
@@ -43,6 +46,8 @@ enum class MainTab2(val title: String) {
 fun MainScreen() {
     val auth = Firebase.auth
     var isAuthenticated by remember { mutableStateOf(auth.currentUser != null) }
+    val viewModel: ProgressViewModel = hiltViewModel()
+    val chatViewModel: com.example.devpath.ui.viewmodel.ChatsViewModel = hiltViewModel()
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { auth ->
@@ -64,6 +69,28 @@ fun MainScreen() {
         val showBottomBar = showMainNavigation &&
                 currentRoute != "profile" &&
                 currentRoute != "settings"
+
+        // ✅ Отслеживаем активность пользователя
+        val currentUserId = Firebase.auth.currentUser?.uid ?: ""
+
+        DisposableEffect(Unit) {
+            if (currentUserId.isNotEmpty()) {
+                chatViewModel.updateUserLastActive(currentUserId)   // обновляем сразу
+            }
+            val job = CoroutineScope(Dispatchers.IO).launch {
+                while (true) {
+                    delay(30000)
+                    val userId = Firebase.auth.currentUser?.uid ?: ""
+                    if (userId.isNotEmpty()) {
+                        chatViewModel.updateUserLastActive(userId)
+                    }
+                }
+            }
+            onDispose {
+                job.cancel()
+                // НЕ вызываем updateUserOnlineStatus(false)
+            }
+        }
 
         Scaffold(
             bottomBar = {
@@ -185,12 +212,17 @@ fun MainScreen() {
                     }
 
                     composable(
-                        route = "chat_detail/{chatId}",
-                        arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+                        route = "chat_detail/{chatId}/{friendId}",
+                        arguments = listOf(
+                            navArgument("chatId") { type = NavType.StringType },
+                            navArgument("friendId") { type = NavType.StringType }
+                        )
                     ) { backStackEntry ->
                         val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                        val friendId = backStackEntry.arguments?.getString("friendId") ?: ""
                         ChatDetailScreen(
                             chatId = chatId,
+                            friendId = friendId,
                             navController = navController
                         )
                     }

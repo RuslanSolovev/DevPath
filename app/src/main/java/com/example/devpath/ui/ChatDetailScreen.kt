@@ -11,13 +11,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
@@ -33,6 +36,7 @@ import java.util.*
 @Composable
 fun ChatDetailScreen(
     chatId: String,
+    friendId: String,
     navController: NavHostController
 ) {
     val currentUserId = Firebase.auth.currentUser?.uid ?: ""
@@ -54,12 +58,16 @@ fun ChatDetailScreen(
     val coroutineScope = rememberCoroutineScope()
     var shouldScrollToBottom by remember { mutableStateOf(true) }
     var previousMessagesCount by remember { mutableStateOf(0) }
-
-    // Флаг для отслеживания, была ли уже загрузка
     var isInitialLoad by remember { mutableStateOf(true) }
+    val userLastActive by viewModel.userLastActive.collectAsState()
 
-    // Загружаем первые сообщения и общее количество
+    // Обновляем активность при входе в чат
+    LaunchedEffect(Unit) {
+        viewModel.updateUserLastActive(currentUserId)
+    }
+
     LaunchedEffect(chatId) {
+        viewModel.updateUserLastActive(currentUserId)
         viewModel.loadMessages(chatId, reset = true)
         viewModel.loadChatName(chatId, currentUserId)
         viewModel.loadTotalMessagesCount(chatId)
@@ -67,30 +75,31 @@ fun ChatDetailScreen(
         isInitialLoad = false
     }
 
-    // Наблюдаем за статусом онлайн собеседника
-    LaunchedEffect(chatId) {
-        val friendId = viewModel.getOtherParticipantId(chatId, currentUserId)
-        if (friendId != null) {
+    // Используем friendId из параметров
+    LaunchedEffect(Unit) {
+        println("DEBUG: ChatDetailScreen - friendId из параметров = $friendId")
+        if (friendId.isNotEmpty() && friendId != "null") {
             viewModel.observeFriendOnlineStatus(friendId)
+            viewModel.observeUserLastActive(friendId)
+        } else {
+            println("DEBUG: ChatDetailScreen - friendId пустой или null!")
         }
     }
 
-    // Наблюдаем за статусом "печатает"
+    LaunchedEffect(userLastActive) {
+        println("DEBUG: ChatDetailScreen - userLastActive изменился на: '$userLastActive'")
+    }
+
+    LaunchedEffect(isUserOnline) {
+        println("DEBUG: ChatDetailScreen - isUserOnline изменился на: $isUserOnline")
+    }
+
     LaunchedEffect(chatId) {
         viewModel.observeTypingStatus(chatId, currentUserId).collect { typing ->
             isSomeoneTyping = typing
         }
     }
 
-    // Обновляем статус онлайн при входе/выходе
-    DisposableEffect(Unit) {
-        viewModel.updateUserOnlineStatus(currentUserId, true)
-        onDispose {
-            viewModel.updateUserOnlineStatus(currentUserId, false)
-        }
-    }
-
-    // Загружаем старые сообщения при скролле вверх
     LaunchedEffect(listState.firstVisibleItemIndex) {
         if (!isLoadingMore && hasMoreMessages && listState.firstVisibleItemIndex == 0 && messages.isNotEmpty() && !isInitialLoad) {
             val currentScrollPosition = listState.firstVisibleItemScrollOffset
@@ -108,7 +117,6 @@ fun ChatDetailScreen(
         }
     }
 
-    // Новые сообщения – скроллим к ним (только если сообщение отправили мы)
     LaunchedEffect(messages.size) {
         if (shouldScrollToBottom && messages.isNotEmpty() && !isLoadingMessages && !isLoadingMore && !isInitialLoad) {
             coroutineScope.launch {
@@ -117,7 +125,6 @@ fun ChatDetailScreen(
         }
     }
 
-    // Отмечаем сообщения как доставленные и прочитанные при прокрутке
     LaunchedEffect(messages, listState.layoutInfo.visibleItemsInfo) {
         if (messages.isNotEmpty()) {
             val visibleMessages = listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }
@@ -144,7 +151,12 @@ fun ChatDetailScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(chatName.ifEmpty { "Чат" })
+                            Text(
+                                text = chatName.ifEmpty { "Чат" },
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
                             if (isUserOnline) {
                                 Box(
                                     modifier = Modifier
@@ -154,18 +166,22 @@ fun ChatDetailScreen(
                                 )
                             }
                         }
-                        if (!isLoadingMessages && totalMessagesCount > 0) {
-                            Text(
-                                text = formatMessagesCount(totalMessagesCount),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = if (isUserOnline) "В сети"
+                            else if (userLastActive.isNotEmpty()) "Был(а) $userLastActive"
+                            else "Был(а) недавно",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Назад",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -174,270 +190,353 @@ fun ChatDetailScreen(
             )
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(paddingValues)
-        ) {
-            // Блок ответа на сообщение
-            if (replyingTo != null) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.background,
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        )
                     )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                )
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // Блок ответа на сообщение
+                if (replyingTo != null) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Default.Reply,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(32.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Reply,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                                 Text(
                                     text = "Ответ для ${replyingTo?.senderName ?: "пользователя"}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
                                 )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
-                            ) {
                                 Text(
                                     text = replyingTo?.text?.take(50) ?: "",
                                     style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(8.dp),
-                                    maxLines = 2,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
-                        }
-                        IconButton(onClick = { viewModel.setReplyingTo(null) }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Отмена",
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Список сообщений
-            Box(modifier = Modifier.weight(1f)) {
-                if (isLoadingMessages && messages.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
-                                strokeWidth = 3.dp
-                            )
-                            Text(
-                                text = "Загрузка сообщений...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        state = listState,
-                        contentPadding = PaddingValues(16.dp),
-                        reverseLayout = false
-                    ) {
-                        if (isLoadingMore) {
-                            item {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(32.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                }
+                            IconButton(
+                                onClick = { viewModel.setReplyingTo(null) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Отмена",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
-
-                        items(messages, key = { it.messageId }) { message ->
-                            MessageBubble(
-                                message = message,
-                                isMine = message.senderId == currentUserId,
-                                currentUserId = currentUserId,
-                                onLongClick = { showMenuForMessage = message }
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
                     }
                 }
-            }
 
-            // Индикатор "печатает..."
-            if (isSomeoneTyping) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
+                // Список сообщений
+                Box(modifier = Modifier.weight(1f)) {
+                    if (isLoadingMessages && messages.isEmpty()) {
                         Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                            modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Собеседник печатает...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                repeat(3) { index ->
-                                    val animation by animateFloatAsState(
-                                        targetValue = 1f,
-                                        animationSpec = repeatable(
-                                            iterations = Int.MAX_VALUE,
-                                            animation = tween(400, easing = LinearEasing),
-                                            repeatMode = RepeatMode.Reverse
-                                        ),
-                                        label = "typing"
-                                    )
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(48.dp),
+                                    strokeWidth = 3.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Загрузка сообщений...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            state = listState,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 16.dp),
+                            reverseLayout = false
+                        ) {
+                            if (isLoadingMore) {
+                                item {
                                     Box(
-                                        modifier = Modifier
-                                            .size(4.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                MaterialTheme.colorScheme.primary.copy(
-                                                    alpha = animation
-                                                )
-                                            )
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+
+                            items(messages, key = { it.messageId }) { message ->
+                                MessageBubbleModern(
+                                    message = message,
+                                    isMine = message.senderId == currentUserId,
+                                    currentUserId = currentUserId,
+                                    onLongClick = { showMenuForMessage = message }
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                }
+
+                // Индикатор "печатает..."
+                if (isSomeoneTyping) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f)
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(32.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Outlined.Edit,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
                                     )
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = "Собеседник печатает...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    repeat(3) { index ->
+                                        val animation by animateFloatAsState(
+                                            targetValue = 1f,
+                                            animationSpec = repeatable(
+                                                iterations = Int.MAX_VALUE,
+                                                animation = tween(400, easing = LinearEasing),
+                                                repeatMode = RepeatMode.Reverse
+                                            ),
+                                            label = "typing"
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    MaterialTheme.colorScheme.primary.copy(
+                                                        alpha = animation
+                                                    )
+                                                )
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // Блок редактирования сообщения
-            if (editingMessage != null) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                // Блок редактирования сообщения
+                if (editingMessage != null) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Редактирование сообщения",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        IconButton(onClick = { viewModel.setEditingMessage(null) }) {
-                            Icon(Icons.Default.Close, contentDescription = "Отмена")
-                        }
-                    }
-                }
-            }
-
-            // Поле ввода
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { newText ->
-                        inputText = newText
-                        if (newText.isNotBlank()) {
-                            viewModel.startTyping(chatId, currentUserId)
-                        } else {
-                            viewModel.stopTyping(chatId, currentUserId)
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text(if (replyingTo != null) "Введите ответ..." else "Сообщение")
-                    },
-                    shape = MaterialTheme.shapes.large,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
-                    )
-                )
-
-                IconButton(
-                    onClick = {
-                        if (inputText.isNotBlank()) {
-                            if (editingMessage != null) {
-                                viewModel.editMessage(editingMessage!!.messageId, inputText)
-                                inputText = ""
-                                viewModel.setEditingMessage(null)
-                            } else {
-                                shouldScrollToBottom = true
-                                viewModel.sendMessage(
-                                    chatId = chatId,
-                                    senderId = currentUserId,
-                                    text = inputText,
-                                    replyToId = replyingTo?.messageId ?: "",
-                                    replyToText = replyingTo?.text ?: "",
-                                    replyToSenderName = replyingTo?.senderName ?: ""
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(32.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
+                                Text(
+                                    text = "Редактирование сообщения",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
                                 )
-                                inputText = ""
-                                viewModel.stopTyping(chatId, currentUserId)
+                            }
+                            IconButton(
+                                onClick = { viewModel.setEditingMessage(null) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Отмена",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
+                }
+
+                // Поле ввода
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                 ) {
-                    Icon(
-                        if (editingMessage != null) Icons.Default.Edit else Icons.Default.Send,
-                        contentDescription = if (editingMessage != null) "Сохранить" else "Отправить",
-                        tint = if (inputText.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { newText ->
+                                inputText = newText
+                                if (newText.isNotBlank()) {
+                                    viewModel.startTyping(chatId, currentUserId)
+                                } else {
+                                    viewModel.stopTyping(chatId, currentUserId)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            placeholder = {
+                                Text(
+                                    if (replyingTo != null) "Введите ответ..." else "Сообщение",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            )
+                        )
+
+                        IconButton(
+                            onClick = {
+                                if (inputText.isNotBlank()) {
+                                    if (editingMessage != null) {
+                                        viewModel.editMessage(editingMessage!!.messageId, inputText)
+                                        inputText = ""
+                                        viewModel.setEditingMessage(null)
+                                    } else {
+                                        shouldScrollToBottom = true
+                                        viewModel.sendMessage(
+                                            chatId = chatId,
+                                            senderId = currentUserId,
+                                            text = inputText,
+                                            replyToId = replyingTo?.messageId ?: "",
+                                            replyToText = replyingTo?.text ?: "",
+                                            replyToSenderName = replyingTo?.senderName ?: ""
+                                        )
+                                        inputText = ""
+                                        viewModel.stopTyping(chatId, currentUserId)
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (inputText.isNotBlank())
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                MaterialTheme.colorScheme.primary,
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                            )
+                                        )
+                                    else
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
+                                            )
+                                        )
+                                )
+                        ) {
+                            Icon(
+                                if (editingMessage != null) Icons.Default.Edit else Icons.Default.Send,
+                                contentDescription = if (editingMessage != null) "Сохранить" else "Отправить",
+                                modifier = Modifier.size(20.dp),
+                                tint = if (inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -448,7 +547,7 @@ fun ChatDetailScreen(
         val message = showMenuForMessage!!
         AlertDialog(
             onDismissRequest = { showMenuForMessage = null },
-            title = { Text("Действия") },
+            title = { Text("Действия", style = MaterialTheme.typography.titleMedium) },
             text = { Text("Выберите действие для сообщения") },
             confirmButton = {
                 Column {
@@ -460,9 +559,8 @@ fun ChatDetailScreen(
                                 inputText = message.text
                             }
                         ) {
-                            Row {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
                                 Text("Редактировать")
                             }
                         }
@@ -475,9 +573,8 @@ fun ChatDetailScreen(
                                 contentColor = MaterialTheme.colorScheme.error
                             )
                         ) {
-                            Row {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
                                 Text("Удалить")
                             }
                         }
@@ -488,9 +585,8 @@ fun ChatDetailScreen(
                             viewModel.setReplyingTo(message)
                         }
                     ) {
-                        Row {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.Reply, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
                             Text("Ответить")
                         }
                     }
@@ -507,7 +603,7 @@ fun ChatDetailScreen(
 }
 
 @Composable
-fun MessageBubble(
+fun MessageBubbleModern(
     message: com.example.devpath.domain.models.Message,
     isMine: Boolean,
     currentUserId: String,
@@ -535,122 +631,60 @@ fun MessageBubble(
             horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
             modifier = Modifier.widthIn(max = 280.dp)
         ) {
-            // Имя отправителя
             if (!isMine && message.senderName.isNotEmpty()) {
                 Text(
                     text = message.senderName,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp)
                 )
             }
 
-            // Блок цитируемого сообщения
             if (message.replyToId.isNotEmpty() && message.replyToText.isNotEmpty()) {
                 Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(8.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Reply,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = message.replyToSenderName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Outlined.Reply, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(message.replyToSenderName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                         }
-                        Text(
-                            text = message.replyToText,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 2,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
+                        Text(message.replyToText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                 }
             }
 
-            // Основное сообщение
             Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = if (isMine)
-                    MaterialTheme.colorScheme.primaryContainer
-                else
-                    MaterialTheme.colorScheme.surfaceVariant,
-                tonalElevation = if (isMine) 0.dp else 1.dp
+                shape = RoundedCornerShape(if (isMine) 20.dp else 20.dp, 4.dp, 20.dp, 20.dp),
+                color = if (isMine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 2.dp
             ) {
-                Column(
-                    modifier = Modifier.padding(12.dp)
-                ) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(message.text, style = MaterialTheme.typography.bodyLarge, color = if (isMine) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
 
-                    Row(
-                        modifier = Modifier.padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (isToday) timeString else "$dateString $timeString",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
+                    Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (isToday) timeString else "$dateString $timeString", style = MaterialTheme.typography.labelSmall, color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant)
                         if (message.edited && !message.deleted) {
-                            Text(
-                                text = "(ред.)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("(ред.)", style = MaterialTheme.typography.labelSmall, color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-
                         if (isMine) {
                             when {
                                 isRead && message.readBy.size > 1 -> {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Default.DoneAll,
-                                            contentDescription = "Прочитано",
-                                            modifier = Modifier.size(14.dp),
-                                            tint = Color(0xFF34B7F1)
-                                        )
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Icon(Icons.Outlined.DoneAll, "Прочитано", modifier = Modifier.size(16.dp), tint = Color(0xFF34B7F1))
                                     }
                                 }
                                 isDelivered && message.deliveredTo.size > 1 -> {
-                                    Icon(
-                                        Icons.Default.DoneAll,
-                                        contentDescription = "Доставлено",
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Icon(Icons.Outlined.DoneAll, "Доставлено", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 message.deliveredTo.isNotEmpty() -> {
-                                    Icon(
-                                        Icons.Default.Done,
-                                        contentDescription = "Отправлено",
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Icon(Icons.Outlined.Done, "Отправлено", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 else -> {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(12.dp),
-                                        strokeWidth = 1.dp
-                                    )
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -661,7 +695,6 @@ fun MessageBubble(
     }
 }
 
-// Вспомогательная функция для форматирования количества сообщений
 private fun formatMessagesCount(count: Long): String {
     return when {
         count == 0L -> "Нет сообщений"

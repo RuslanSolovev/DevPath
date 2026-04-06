@@ -16,7 +16,7 @@ import com.google.firebase.firestore.ktx.firestore
 fun AuthScreen(onSuccess: () -> Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }  // ✅ Добавляем поле для имени
+    var name by remember { mutableStateOf("") }
     var isSignUpMode by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
 
@@ -27,7 +27,6 @@ fun AuthScreen(onSuccess: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // ✅ Поле для имени (только при регистрации)
         if (isSignUpMode) {
             OutlinedTextField(
                 value = name,
@@ -82,7 +81,6 @@ fun AuthScreen(onSuccess: () -> Unit) {
         TextButton(
             onClick = {
                 isSignUpMode = !isSignUpMode
-                // Очищаем поля при смене режима
                 if (!isSignUpMode) {
                     name = ""
                 }
@@ -130,41 +128,32 @@ private fun signUp(
             val userId = result.user?.uid ?: ""
             val userEmail = result.user?.email ?: cleanEmail
 
-            // ✅ Обновляем displayName в Firebase Auth
             val profileUpdates = com.google.firebase.auth.UserProfileChangeRequest.Builder()
                 .setDisplayName(cleanName)
                 .build()
             result.user?.updateProfile(profileUpdates)
-                ?.addOnSuccessListener {
-                    Log.d("Auth", "✅ Имя обновлено в Firebase Auth")
-                }
-                ?.addOnFailureListener { e ->
-                    Log.e("Auth", "❌ Ошибка обновления имени: ${e.message}")
-                }
 
-            // ✅ Создаём профиль в Firestore
             val db = Firebase.firestore
             val userProfile = hashMapOf(
                 "userId" to userId,
                 "name" to cleanName,
-                "nameLowercase" to cleanName.lowercase(),  // ← добавить
+                "nameLowercase" to cleanName.lowercase(),
                 "email" to userEmail,
-                "emailLowercase" to userEmail.lowercase(),  // ← добавить
-                "online" to true,
+                "emailLowercase" to userEmail.lowercase(),
                 "lastSeen" to com.google.firebase.Timestamp.now(),
+                "lastActiveInApp" to com.google.firebase.Timestamp.now(),
                 "createdAt" to com.google.firebase.Timestamp.now()
             )
 
             db.collection("users").document(userId)
                 .set(userProfile)
                 .addOnSuccessListener {
-                    Log.d("Auth", "✅ Профиль пользователя создан в Firestore: имя=$cleanName")
+                    Log.d("Auth", "✅ Профиль пользователя создан в Firestore")
                     onLoadingChange(false)
                     onSuccess()
                 }
                 .addOnFailureListener { e ->
-                    Log.e("Auth", "❌ Ошибка создания профиля в Firestore: ${e.message}")
-                    // Всё равно считаем регистрацию успешной
+                    Log.e("Auth", "❌ Ошибка создания профиля: ${e.message}")
                     onLoadingChange(false)
                     onSuccess()
                 }
@@ -183,6 +172,7 @@ private fun signIn(
 ) {
     if (email.isBlank() || password.isBlank()) {
         Log.e("Auth", "❌ Email или пароль пустые")
+        onLoadingChange(false)
         return
     }
 
@@ -198,46 +188,54 @@ private fun signIn(
             val userId = result.user?.uid ?: ""
             val userEmail = result.user?.email ?: email
 
-            // ✅ Проверяем, есть ли профиль пользователя в Firestore
             val db = Firebase.firestore
             db.collection("users").document(userId).get()
                 .addOnSuccessListener { document ->
                     if (!document.exists()) {
-                        // Если профиля нет, создаём (для старых пользователей)
                         val userName = result.user?.displayName ?: userEmail.split("@").first()
                         val userProfile = hashMapOf(
                             "userId" to userId,
                             "name" to userName,
+                            "nameLowercase" to userName.lowercase(),
                             "email" to userEmail,
-                            "online" to true,
+                            "emailLowercase" to userEmail.lowercase(),
                             "lastSeen" to com.google.firebase.Timestamp.now(),
+                            "lastActiveInApp" to com.google.firebase.Timestamp.now(),
                             "createdAt" to com.google.firebase.Timestamp.now()
                         )
                         db.collection("users").document(userId).set(userProfile)
                             .addOnSuccessListener {
-                                Log.d("Auth", "✅ Профиль пользователя создан при входе")
+                                Log.d("Auth", "✅ Профиль создан")
+                                onLoadingChange(false)
+                                onSuccess()
                             }
                             .addOnFailureListener { e ->
-                                Log.e("Auth", "❌ Ошибка создания профиля: ${e.message}")
+                                Log.e("Auth", "❌ Ошибка: ${e.message}")
+                                onLoadingChange(false)
+                                onSuccess()
                             }
                     } else {
-                        // ✅ Обновляем статус online
                         db.collection("users").document(userId)
                             .update(
-                                "online", true,
-                                "lastSeen", com.google.firebase.Timestamp.now()
+                                "lastSeen", com.google.firebase.Timestamp.now(),
+                                "lastActiveInApp", com.google.firebase.Timestamp.now()
                             )
+                            .addOnSuccessListener {
+                                onLoadingChange(false)
+                                onSuccess()
+                            }
                             .addOnFailureListener { e ->
-                                Log.e("Auth", "❌ Ошибка обновления статуса: ${e.message}")
+                                Log.e("Auth", "❌ Ошибка: ${e.message}")
+                                onLoadingChange(false)
+                                onSuccess()
                             }
                     }
                 }
                 .addOnFailureListener { e ->
-                    Log.e("Auth", "❌ Ошибка проверки профиля: ${e.message}")
+                    Log.e("Auth", "❌ Ошибка: ${e.message}")
+                    onLoadingChange(false)
+                    onSuccess()
                 }
-
-            onLoadingChange(false)
-            onSuccess()
         }
         .addOnFailureListener { exception ->
             Log.e("Auth", "❌ Ошибка входа: ${exception.message}")
