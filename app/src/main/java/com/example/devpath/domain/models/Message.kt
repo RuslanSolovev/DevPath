@@ -12,6 +12,7 @@ data class Message(
     val readBy: List<String> = emptyList(),
     val deliveredTo: List<String> = emptyList(),
     val replyToId: String = "",
+    val imageUrl: String = "",
     val replyToText: String = "",
     val replyToSenderName: String = "",
     val edited: Boolean = false,        // ← было isEdited, стало edited

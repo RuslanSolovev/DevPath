@@ -4,8 +4,10 @@ import android.content.Context
 import com.example.devpath.api.GigaChatService
 import com.example.devpath.api.speech.SaluteSpeechService
 import com.example.devpath.data.local.AppDatabase
+import com.example.devpath.data.repository.ChatRepository  // ✅ ДОБАВИТЬ
 import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.data.repository.ThemeRepository
+import com.example.devpath.data.storage.YandexStorageClient  // ✅ ДОБАВИТЬ
 import com.google.firebase.firestore.FirebaseFirestore
 import dagger.Module
 import dagger.Provides
@@ -48,7 +50,6 @@ object AppModule {
         return SaluteSpeechService()
     }
 
-
     @Provides
     @Singleton
     fun provideProgressRepository(
@@ -57,9 +58,16 @@ object AppModule {
     ): ProgressRepository {
         return ProgressRepository(
             db = firestore,
-
             localDb = database
         )
     }
 
+    // ✅ ДОБАВИТЬ: Репозиторий чата с внедрением YandexStorageClient
+    @Provides
+    @Singleton
+    fun provideChatRepository(
+        yandexStorageClient: YandexStorageClient
+    ): ChatRepository {
+        return ChatRepository(yandexStorageClient)
+    }
 }

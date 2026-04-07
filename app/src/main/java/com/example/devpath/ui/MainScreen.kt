@@ -1,5 +1,7 @@
 package com.example.devpath.ui
 
+import android.net.Uri
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,8 +15,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -23,6 +27,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.devpath.BuildConfig
 import com.example.devpath.data.repository.LocalThemeRepository
 import com.example.devpath.ui.theme.AppTheme
 import com.example.devpath.ui.viewmodel.ProgressViewModel
@@ -67,9 +72,12 @@ fun MainScreen() {
 
         var showMainNavigation by remember { mutableStateOf(true) }
 
-        val showBottomBar = showMainNavigation &&
-                currentRoute != "profile" &&
-                currentRoute != "settings"
+        val isHiddenRoute = currentRoute == "profile" ||
+                currentRoute == "settings" ||
+                currentRoute?.startsWith("chat_detail") == true ||
+                currentRoute?.startsWith("fullscreen_image") == true
+
+        val showBottomBar = showMainNavigation && !isHiddenRoute
 
         val currentUserId = Firebase.auth.currentUser?.uid ?: ""
 
@@ -225,6 +233,24 @@ fun MainScreen() {
                             navController = navController
                         )
                     }
+                    composable(
+                        route = "fullscreen_image/{imageUrl}",
+                        arguments = listOf(
+                            navArgument("imageUrl") {
+                                type = NavType.StringType
+                                defaultValue = ""
+                            }
+                        )
+                    ) { backStackEntry ->
+                        val encodedUrl = backStackEntry.arguments?.getString("imageUrl") ?: ""
+                        val imageUrl = Uri.decode(encodedUrl)
+                        if (imageUrl.isNotEmpty()) {
+                            FullScreenImageView(
+                                imageUrl = imageUrl,
+                                navController = navController
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -240,7 +266,17 @@ fun HomeTabScreen(
     val viewModel: ProgressViewModel = hiltViewModel()
     val announcementRepository =
         remember { com.example.devpath.data.repository.AnnouncementRepository() }
-    val chatRepository = remember { com.example.devpath.data.repository.ChatRepository() }
+    val context = LocalContext.current
+    val chatRepository = remember {
+        com.example.devpath.data.repository.ChatRepository(
+            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
+                context = context,
+                accessKey = BuildConfig.YC_ACCESS_KEY,
+                secretKey = BuildConfig.YC_SECRET_KEY,
+                bucketName = BuildConfig.YC_BUCKET_NAME
+            )
+        )
+    }
 
     var displayName by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
@@ -509,6 +545,7 @@ fun HomeTabScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateAnnouncementDialogModern(
     onDismiss: () -> Unit,
@@ -521,123 +558,309 @@ fun CreateAnnouncementDialogModern(
     var showAdvanced by remember { mutableStateOf(false) }
     var actionText by remember { mutableStateOf("") }
     var actionUrl by remember { mutableStateOf("") }
+    var isCreating by remember { mutableStateOf(false) }
 
     val types = listOf(
         "info" to "ℹ️ Информация",
-        "warning" to "⚠️ Предупреждение",
-        "success" to "✅ Успех",
+        "warning" to "⚠️ Важное",
+        "success" to "🎉 Успех",
         "event" to "📅 Событие",
         "update" to "🔄 Обновление"
     )
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(28.dp),
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Announcement, contentDescription = null, modifier = Modifier.size(24.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Создать объявление", style = MaterialTheme.typography.titleLarge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+
+                        Icon(
+                            Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        "Создать объявление",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Закрыть")
+                }
             }
         },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Заголовок") },
+                    placeholder = { Text("Например: Важное обновление") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Title, contentDescription = null) }
+                    shape = RoundedCornerShape(16.dp),
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Title,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                    )
                 )
 
                 OutlinedTextField(
                     value = message,
                     onValueChange = { message = it },
                     label = { Text("Текст объявления") },
+                    placeholder = { Text("Напишите важную информацию для пользователей...") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
-                    leadingIcon = { Icon(Icons.Default.Description, contentDescription = null) }
+                    maxLines = 5,
+                    shape = RoundedCornerShape(16.dp),
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                    )
                 )
 
-                Text("Тип объявления", style = MaterialTheme.typography.labelMedium)
-                Row(
+                Card(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
                 ) {
-                    types.forEach { (type, label) ->
-                        FilterChip(
-                            selected = selectedType == type,
-                            onClick = { selectedType = type },
-                            label = { Text(label) },
-                            modifier = Modifier.weight(1f)
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "Тип объявления",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            types.forEach { (type, label) ->
+                                FilterChip(
+                                    selected = selectedType == type,
+                                    onClick = { selectedType = type },
+                                    label = { Text(label, fontSize = MaterialTheme.typography.labelMedium.fontSize) },
+                                    modifier = Modifier.weight(1f),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = when (type) {
+                                            "warning" -> MaterialTheme.colorScheme.errorContainer
+                                            "success" -> Color(0xFF4CAF50).copy(alpha = 0.15f)
+                                            "event" -> MaterialTheme.colorScheme.secondaryContainer
+                                            "update" -> MaterialTheme.colorScheme.tertiaryContainer
+                                            else -> MaterialTheme.colorScheme.primaryContainer
+                                        },
+                                        selectedLabelColor = when (type) {
+                                            "warning" -> MaterialTheme.colorScheme.error
+                                            "success" -> Color(0xFF4CAF50)
+                                            else -> MaterialTheme.colorScheme.primary
+                                        }
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
 
-                Text("Приоритет (1-5)", style = MaterialTheme.typography.labelMedium)
-                Row(
+                Card(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
                 ) {
-                    (1..5).forEach { priority ->
-                        FilterChip(
-                            selected = selectedPriority == priority,
-                            onClick = { selectedPriority = priority },
-                            label = { Text(priority.toString()) },
-                            modifier = Modifier.weight(1f),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = when (priority) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Приоритет",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                when (selectedPriority) {
+                                    5 -> "🔥 Критический"
+                                    4 -> "⚡ Высокий"
+                                    3 -> "📌 Средний"
+                                    2 -> "✨ Низкий"
+                                    else -> "💡 Информационный"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = when (selectedPriority) {
+                                    5 -> MaterialTheme.colorScheme.error
+                                    4 -> MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                                    3 -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            (1..5).forEach { priority ->
+                                val priorityColor = when (priority) {
                                     5 -> MaterialTheme.colorScheme.error
                                     4 -> MaterialTheme.colorScheme.errorContainer
-                                    else -> MaterialTheme.colorScheme.primaryContainer
+                                    3 -> MaterialTheme.colorScheme.primary
+                                    2 -> MaterialTheme.colorScheme.primaryContainer
+                                    else -> MaterialTheme.colorScheme.surfaceVariant
                                 }
-                            )
-                        )
+
+                                Surface(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selectedPriority == priority) priorityColor
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                    onClick = { selectedPriority = priority }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = priority.toString(),
+                                            fontWeight = if (selectedPriority == priority) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (selectedPriority == priority)
+                                                if (priority == 5) MaterialTheme.colorScheme.onError
+                                                else if (priority == 4) MaterialTheme.colorScheme.onErrorContainer
+                                                else MaterialTheme.colorScheme.onPrimaryContainer
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
-                TextButton(
-                    onClick = { showAdvanced = !showAdvanced },
-                    modifier = Modifier.align(Alignment.Start)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    onClick = { showAdvanced = !showAdvanced }
                 ) {
-                    Icon(
-                        if (showAdvanced) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null
-                    )
-                    Text(if (showAdvanced) "Скрыть доп. настройки" else "Дополнительные настройки")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (showAdvanced) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Дополнительные настройки",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (!showAdvanced) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.primary
+                            ) {
+                                Text("Кнопка действия")
+                            }
+                        }
+                    }
                 }
 
                 if (showAdvanced) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                         )
                     ) {
                         Column(
-                            modifier = Modifier.padding(12.dp),
+                            modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             OutlinedTextField(
                                 value = actionText,
                                 onValueChange = { actionText = it },
-                                label = { Text("Текст кнопки действия") },
+                                label = { Text("Текст кнопки") },
+                                placeholder = { Text("Например: Подробнее") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true,
-                                placeholder = { Text("Например: Узнать больше") }
+                                shape = RoundedCornerShape(12.dp),
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.OpenInNew,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             )
 
                             OutlinedTextField(
                                 value = actionUrl,
                                 onValueChange = { actionUrl = it },
-                                label = { Text("Ссылка (URL)") },
+                                label = { Text("Ссылка") },
+                                placeholder = { Text("https://...") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true,
-                                placeholder = { Text("https://...") }
+                                shape = RoundedCornerShape(12.dp),
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Link,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             )
                         }
                     }
@@ -647,7 +870,8 @@ fun CreateAnnouncementDialogModern(
         confirmButton = {
             Button(
                 onClick = {
-                    if (title.isNotBlank() && message.isNotBlank()) {
+                    if (title.isNotBlank() && message.isNotBlank() && !isCreating) {
+                        isCreating = true
                         onCreate(
                             title,
                             message,
@@ -656,21 +880,41 @@ fun CreateAnnouncementDialogModern(
                             actionText.takeIf { it.isNotBlank() },
                             actionUrl.takeIf { it.isNotBlank() }
                         )
+                        onDismiss()
                     }
                 },
-                enabled = title.isNotBlank() && message.isNotBlank()
+                enabled = title.isNotBlank() && message.isNotBlank() && !isCreating,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
             ) {
-                Icon(Icons.Default.Send, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Опубликовать")
+                if (isCreating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Публикация...")
+                } else {
+                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Опубликовать объявление")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
+            TextButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Отмена", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        shape = RoundedCornerShape(20.dp)
+        modifier = Modifier.fillMaxWidth(0.95f)
     )
 }
 
@@ -679,67 +923,13 @@ fun AnnouncementCardInfo(
     announcement: com.example.devpath.domain.models.Announcement,
     onDismiss: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Surface(
-                        modifier = Modifier.size(40.dp),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = announcement.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Закрыть",
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = announcement.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        }
-    }
+    ModernAnnouncementCard(
+        announcement = announcement,
+        onDismiss = onDismiss,
+        icon = Icons.Default.Info,
+        iconColor = MaterialTheme.colorScheme.primary,
+        backgroundColor = MaterialTheme.colorScheme.primaryContainer
+    )
 }
 
 @Composable
@@ -747,67 +937,13 @@ fun AnnouncementCardWarning(
     announcement: com.example.devpath.domain.models.Announcement,
     onDismiss: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Surface(
-                        modifier = Modifier.size(40.dp),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = announcement.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Закрыть",
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = announcement.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer
-            )
-        }
-    }
+    ModernAnnouncementCard(
+        announcement = announcement,
+        onDismiss = onDismiss,
+        icon = Icons.Default.Warning,
+        iconColor = MaterialTheme.colorScheme.error,
+        backgroundColor = MaterialTheme.colorScheme.errorContainer
+    )
 }
 
 @Composable
@@ -815,67 +951,13 @@ fun AnnouncementCardSuccess(
     announcement: com.example.devpath.domain.models.Announcement,
     onDismiss: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF4CAF50).copy(alpha = 0.1f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Surface(
-                        modifier = Modifier.size(40.dp),
-                        shape = CircleShape,
-                        color = Color(0xFF4CAF50).copy(alpha = 0.2f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF4CAF50),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = announcement.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF4CAF50)
-                    )
-                }
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Закрыть",
-                        modifier = Modifier.size(18.dp),
-                        tint = Color(0xFF4CAF50)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = announcement.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF2E7D32)
-            )
-        }
-    }
+    ModernAnnouncementCard(
+        announcement = announcement,
+        onDismiss = onDismiss,
+        icon = Icons.Default.CheckCircle,
+        iconColor = Color(0xFF4CAF50),
+        backgroundColor = Color(0xFF4CAF50).copy(alpha = 0.1f)
+    )
 }
 
 @Composable
@@ -883,67 +965,13 @@ fun AnnouncementCardEvent(
     announcement: com.example.devpath.domain.models.Announcement,
     onDismiss: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.95f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Surface(
-                        modifier = Modifier.size(40.dp),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.Event,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = announcement.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Закрыть",
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = announcement.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-        }
-    }
+    ModernAnnouncementCard(
+        announcement = announcement,
+        onDismiss = onDismiss,
+        icon = Icons.Default.Event,
+        iconColor = MaterialTheme.colorScheme.secondary,
+        backgroundColor = MaterialTheme.colorScheme.secondaryContainer
+    )
 }
 
 @Composable
@@ -951,45 +979,81 @@ fun AnnouncementCardUpdate(
     announcement: com.example.devpath.domain.models.Announcement,
     onDismiss: () -> Unit
 ) {
+    ModernAnnouncementCard(
+        announcement = announcement,
+        onDismiss = onDismiss,
+        icon = Icons.Default.SystemUpdate,
+        iconColor = MaterialTheme.colorScheme.tertiary,
+        backgroundColor = MaterialTheme.colorScheme.tertiaryContainer
+    )
+}
+
+@Composable
+private fun ModernAnnouncementCard(
+    announcement: com.example.devpath.domain.models.Announcement,
+    onDismiss: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconColor: Color,
+    backgroundColor: Color
+) {
+    var showFullMessage by remember { mutableStateOf(false) }
+    val isLongMessage = announcement.message.length > 120
+    val context = LocalContext.current
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.95f)
+            containerColor = backgroundColor.copy(alpha = 0.95f)
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 0.dp,
+            pressedElevation = 2.dp
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Surface(
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(44.dp),
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
+                        color = iconColor.copy(alpha = 0.15f),
+                        shadowElevation = 2.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                Icons.Default.SystemUpdate,
+                                icon,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.tertiary,
+                                tint = iconColor,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
                     }
+
                     Text(
                         text = announcement.title,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                        fontWeight = FontWeight.SemiBold,
+                        color = when (iconColor) {
+                            MaterialTheme.colorScheme.error -> MaterialTheme.colorScheme.onErrorContainer
+                            Color(0xFF4CAF50) -> Color(0xFF2E7D32)
+                            else -> MaterialTheme.colorScheme.onPrimaryContainer
+                        }
                     )
                 }
+
                 IconButton(
                     onClick = onDismiss,
                     modifier = Modifier.size(32.dp)
@@ -998,7 +1062,11 @@ fun AnnouncementCardUpdate(
                         Icons.Default.Close,
                         contentDescription = "Закрыть",
                         modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                        tint = when (iconColor) {
+                            MaterialTheme.colorScheme.error -> MaterialTheme.colorScheme.onErrorContainer
+                            Color(0xFF4CAF50) -> Color(0xFF2E7D32)
+                            else -> MaterialTheme.colorScheme.onPrimaryContainer
+                        }.copy(alpha = 0.7f)
                     )
                 }
             }
@@ -1006,10 +1074,76 @@ fun AnnouncementCardUpdate(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = announcement.message,
+                text = if (showFullMessage || !isLongMessage) announcement.message
+                else announcement.message.take(120) + "...",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer
+                color = when (iconColor) {
+                    MaterialTheme.colorScheme.error -> MaterialTheme.colorScheme.onErrorContainer
+                    Color(0xFF4CAF50) -> Color(0xFF1B5E20)
+                    else -> MaterialTheme.colorScheme.onPrimaryContainer
+                }.copy(alpha = 0.9f),
+                lineHeight = 20.sp
             )
+
+            if (isLongMessage) {
+                TextButton(
+                    onClick = { showFullMessage = !showFullMessage },
+                    modifier = Modifier.padding(top = 4.dp),
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (showFullMessage) "Свернуть" else "Читать далее",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = iconColor
+                    )
+                }
+            }
+
+            // Кнопка действия - исправлено: используем Card вместо Surface с onClick
+            announcement.actionText?.takeIf { it.isNotBlank() }?.let { actionText ->
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            announcement.actionUrl?.let { url ->
+                                try {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }
+                        },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = iconColor.copy(alpha = 0.12f)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = actionText,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = iconColor
+                        )
+                        Icon(
+                            Icons.Default.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = iconColor
+                        )
+                    }
+                }
+            }
         }
     }
 }

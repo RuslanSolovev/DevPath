@@ -1,4 +1,6 @@
-// app/build.gradle.kts
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -8,6 +10,23 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     id("kotlin-parcelize")
 }
+
+// Загружаем local.properties
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+    println("✅ local.properties loaded")
+} else {
+    println("❌ local.properties not found at ${localPropertiesFile.absolutePath}")
+}
+
+val ycAccessKey: String = localProperties.getProperty("yc_access_key", "")
+val ycSecretKey: String = localProperties.getProperty("yc_secret_key", "")
+val ycBucketName: String = localProperties.getProperty("yc_bucket_name", "")
+
+println("YC_ACCESS_KEY: ${if (ycAccessKey.isNotEmpty()) "***" else "NOT SET"}")
+println("YC_BUCKET_NAME: ${if (ycBucketName.isNotEmpty()) ycBucketName else "NOT SET"}")
 
 android {
     namespace = "com.example.devpath"
@@ -24,6 +43,11 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // ✅ Добавляем поля в BuildConfig
+        buildConfigField("String", "YC_ACCESS_KEY", "\"$ycAccessKey\"")
+        buildConfigField("String", "YC_SECRET_KEY", "\"$ycSecretKey\"")
+        buildConfigField("String", "YC_BUCKET_NAME", "\"$ycBucketName\"")
     }
 
     buildTypes {
@@ -40,16 +64,20 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true  // ✅ ВАЖНО: включает генерацию BuildConfig
     }
+
     composeOptions {
-        kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -59,7 +87,22 @@ android {
 
 dependencies {
 
-    implementation("com.google.firebase:firebase-firestore-ktx")
+    // Accompanist System UI Controller (для скрытия статус-бара)
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
+
+    // AWS SDK для Yandex Cloud Object Storage
+    implementation("com.amazonaws:aws-android-sdk-s3:2.73.0")
+    implementation("com.amazonaws:aws-android-sdk-core:2.73.0")
+
+    // Coil для загрузки изображений
+    implementation(libs.coil.compose)
+
+    // Firebase
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
+
     // Core Android
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -71,14 +114,15 @@ dependencies {
     implementation(libs.androidx.material3)
 
     // Для работы с API
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging.interceptor)
 
-    // Kotlin Serialization - ИСПРАВЬТЕ ЭТУ СТРОКУ
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    // Kotlin Serialization
+    implementation(libs.kotlinx.serialization.json)
 
-    // Coroutines - ИСПРАВЬТЕ ЭТУ СТРОКУ (убрать лишнюю кавычку)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // Coroutines
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // Jetpack Compose Navigation
     implementation(libs.androidx.navigation.compose)
@@ -87,12 +131,6 @@ dependencies {
 
     // Lifecycle ViewModel для Compose
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-
-    // Firebase
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)
-    implementation(libs.firebase.firestore)
-    implementation(libs.firebase.storage)
 
     // Google Sign-In
     implementation(libs.play.services.auth)
@@ -105,27 +143,20 @@ dependencies {
     kapt(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
-    // Coroutines
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.kotlinx.coroutines.play.services)
-
     // Room Database
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     kapt(libs.androidx.room.compiler)
 
-    // Coil для загрузки изображений
-    implementation(libs.coil.compose)
-
+    // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.0")
+    implementation("androidx.lifecycle:lifecycle-common:2.8.0")
 
-    implementation("androidx.media:media:1.6.0")
-
-    implementation ("androidx.lifecycle:lifecycle-process:2.7.0")
-
-    implementation ("androidx.lifecycle:lifecycle-common:2.7.0")
+    // Media
+    implementation("androidx.media:media:1.7.0")
 
     // DataStore для хранения настроек
     implementation(libs.androidx.datastore.preferences)
@@ -138,4 +169,10 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+// Настройка kapt
+kapt {
+    correctErrorTypes = true
+    useBuildCache = true
 }

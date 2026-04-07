@@ -1,5 +1,8 @@
 package com.example.devpath.data.repository
 
+import android.content.ContentResolver
+import android.net.Uri
+import com.example.devpath.data.storage.YandexStorageClient
 import com.example.devpath.domain.models.*
 import com.google.firebase.firestore.AggregateSource
 import com.google.firebase.firestore.FieldValue
@@ -19,7 +22,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class ChatRepository @Inject constructor() {
+class ChatRepository @Inject constructor(
+    private val yandexStorageClient: YandexStorageClient
+) {
     private val db: FirebaseFirestore = Firebase.firestore
 
     fun getFriends(userId: String): Flow<List<UserProfile>> = callbackFlow {
@@ -79,6 +84,54 @@ class ChatRepository @Inject constructor() {
             subscription2.remove()
         }
     }
+
+    // Добавьте этот метод в ChatRepository
+    suspend fun sendImageMessageWithText(
+        chatId: String,
+        senderId: String,
+        imageUrl: String,
+        text: String,
+        replyToId: String = "",
+        replyToText: String = "",
+        replyToSenderName: String = ""
+    ): Boolean {
+        return try {
+            updateUserLastActive(senderId)
+            val sender = getUser(senderId)
+            val senderName = sender?.name ?: "Пользователь"
+
+            val message = Message(
+                chatId = chatId,
+                senderId = senderId,
+                senderName = senderName,
+                text = text,  // ← текст и фото вместе
+                imageUrl = imageUrl,
+                timestamp = com.google.firebase.Timestamp.now(),
+                readBy = emptyList(),
+                deliveredTo = listOf(senderId),
+                replyToId = replyToId,
+                replyToText = replyToText,
+                replyToSenderName = replyToSenderName
+            )
+            db.collection("messages").add(message).await()
+
+            db.collection("chats").document(chatId)
+                .update(
+                    mapOf(
+                        "lastMessage" to if (text.isNotEmpty()) text else "📷 Изображение",
+                        "lastMessageSender" to senderName,
+                        "lastMessageTime" to com.google.firebase.Timestamp.now()
+                    )
+                )
+                .await()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+
 
     fun getIncomingRequests(userId: String): Flow<List<FriendRequest>> = callbackFlow {
         val query = db.collection("friend_requests")
@@ -430,7 +483,6 @@ class ChatRepository @Inject constructor() {
         }
     }
 
-    // Новая реализация observeUserOnlineStatus - вычисляет онлайн по lastActiveInApp
     fun observeUserOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
         val subscription = db.collection("users").document(userId)
             .addSnapshotListener { snapshot, error ->
@@ -440,7 +492,7 @@ class ChatRepository @Inject constructor() {
                 }
                 val lastActive = snapshot?.getTimestamp("lastActiveInApp")
                 val isOnline = lastActive != null &&
-                        (System.currentTimeMillis() - lastActive.toDate().time) < 120_000 // 2 минуты
+                        (System.currentTimeMillis() - lastActive.toDate().time) < 120_000
                 trySend(isOnline)
             }
         awaitClose { subscription.remove() }
@@ -543,7 +595,6 @@ class ChatRepository @Inject constructor() {
 
     suspend fun sendMessage(chatId: String, senderId: String, text: String, replyToId: String = "", replyToText: String = "", replyToSenderName: String = ""): Boolean {
         return try {
-            // Обновляем активность перед отправкой
             updateUserLastActive(senderId)
 
             val sender = getUser(senderId)
@@ -574,6 +625,56 @@ class ChatRepository @Inject constructor() {
                 .await()
             true
         } catch (e: Exception) {
+            false
+        }
+    }
+
+    // ✅ НОВЫЙ МЕТОД: Загрузка изображения в Yandex Cloud
+    suspend fun uploadImageAndGetUrl(uri: Uri, contentResolver: ContentResolver): String {
+        return yandexStorageClient.uploadImage(uri, contentResolver)
+    }
+
+    // ✅ НОВЫЙ МЕТОД: Отправка сообщения с изображением
+    suspend fun sendImageMessage(
+        chatId: String,
+        senderId: String,
+        imageUrl: String,
+        replyToId: String = "",
+        replyToText: String = "",
+        replyToSenderName: String = ""
+    ): Boolean {
+        return try {
+            updateUserLastActive(senderId)
+            val sender = getUser(senderId)
+            val senderName = sender?.name ?: "Пользователь"
+
+            val message = Message(
+                chatId = chatId,
+                senderId = senderId,
+                senderName = senderName,
+                text = "",
+                imageUrl = imageUrl,
+                timestamp = com.google.firebase.Timestamp.now(),
+                readBy = emptyList(),
+                deliveredTo = listOf(senderId),
+                replyToId = replyToId,
+                replyToText = replyToText,
+                replyToSenderName = replyToSenderName
+            )
+            db.collection("messages").add(message).await()
+
+            db.collection("chats").document(chatId)
+                .update(
+                    mapOf(
+                        "lastMessage" to "📷 Изображение",
+                        "lastMessageSender" to senderName,
+                        "lastMessageTime" to com.google.firebase.Timestamp.now()
+                    )
+                )
+                .await()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }

@@ -1,5 +1,7 @@
 package com.example.devpath.ui.viewmodel
 
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavHostController
@@ -82,6 +84,38 @@ class ChatsViewModel @Inject constructor(
 
     private val _userLastActive = MutableStateFlow("")
     val userLastActive: StateFlow<String> = _userLastActive.asStateFlow()
+
+
+
+    // Добавьте этот метод в ChatsViewModel
+    fun sendImageMessageWithText(
+        chatId: String,
+        senderId: String,
+        imageUri: Uri,
+        text: String,
+        contentResolver: ContentResolver,
+        replyToId: String = "",
+        replyToText: String = "",
+        replyToSenderName: String = ""
+    ) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val imageUrl = chatRepository.uploadImageAndGetUrl(imageUri, contentResolver)
+                val success = chatRepository.sendImageMessageWithText(
+                    chatId, senderId, imageUrl, text,
+                    replyToId, replyToText, replyToSenderName
+                )
+                if (success) {
+                    loadMessages(chatId, reset = true)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
 
     fun observeUserLastActive(userId: String) {
         viewModelScope.launch {
@@ -315,7 +349,6 @@ class ChatsViewModel @Inject constructor(
         _totalMessagesCount.value += 1
 
         viewModelScope.launch {
-            // Обновляем активность перед отправкой
             updateUserLastActive(senderId)
 
             val success = chatRepository.sendMessage(chatId, senderId, text, replyToId, replyToText, replyToSenderName)
@@ -327,6 +360,35 @@ class ChatsViewModel @Inject constructor(
                         message
                     }
                 }
+            }
+        }
+    }
+
+    // ✅ НОВЫЙ МЕТОД: Отправка сообщения с изображением
+    fun sendImageMessage(
+        chatId: String,
+        senderId: String,
+        imageUri: Uri,
+        contentResolver: ContentResolver,
+        replyToId: String = "",
+        replyToText: String = "",
+        replyToSenderName: String = ""
+    ) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val imageUrl = chatRepository.uploadImageAndGetUrl(imageUri, contentResolver)
+                val success = chatRepository.sendImageMessage(
+                    chatId, senderId, imageUrl,
+                    replyToId, replyToText, replyToSenderName
+                )
+                if (success) {
+                    loadMessages(chatId, reset = true)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isLoading.value = false
             }
         }
     }
