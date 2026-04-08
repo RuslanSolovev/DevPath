@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import com.example.devpath.ui.components.UserAvatar
+import com.example.devpath.ui.viewmodel.ChatsViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 
@@ -54,7 +55,7 @@ fun MainScreen() {
     val auth = Firebase.auth
     var isAuthenticated by remember { mutableStateOf(auth.currentUser != null) }
     val viewModel: ProgressViewModel = hiltViewModel()
-    val chatViewModel: com.example.devpath.ui.viewmodel.ChatsViewModel = hiltViewModel()
+    val chatViewModel: ChatsViewModel = hiltViewModel()
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { auth ->
@@ -234,6 +235,18 @@ fun MainScreen() {
                             navController = navController
                         )
                     }
+
+                    composable(
+                        route = "search_messages/{chatId}",
+                        arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                        SearchMessagesScreen(
+                            chatId = chatId,
+                            navController = navController
+                        )
+                    }
+
                     composable(
                         route = "fullscreen_image/{imageUrl}",
                         arguments = listOf(
@@ -251,6 +264,7 @@ fun MainScreen() {
                                 navController = navController
                             )
                         }
+
                     }
                 }
             }

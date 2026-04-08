@@ -1,6 +1,9 @@
 package com.example.devpath.ui
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -22,8 +25,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -33,17 +34,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
-import com.example.devpath.ui.components.UserAvatar
+import com.example.devpath.BuildConfig
+import com.example.devpath.domain.models.Chat
+import com.example.devpath.domain.models.Message
+import com.example.devpath.domain.models.Reaction
+import com.example.devpath.ui.components.*
 import com.example.devpath.ui.viewmodel.ChatsViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+
+val availableReactions = listOf("👍", "❤️", "😂", "😮", "😢", "😡")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
@@ -66,7 +75,7 @@ fun ChatDetailScreen(
     val totalMessagesCount by viewModel.totalMessagesCount.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
-    var showMenuForMessage by remember { mutableStateOf<com.example.devpath.domain.models.Message?>(null) }
+    var showMenuForMessage by remember { mutableStateOf<Message?>(null) }
     var isSomeoneTyping by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -75,19 +84,159 @@ fun ChatDetailScreen(
     var isInitialLoad by remember { mutableStateOf(true) }
     val userLastActive by viewModel.userLastActive.collectAsState()
 
-    // Состояния для улучшенной отправки фото
+    // Состояния для пересылки
+    var showForwardDialog by remember { mutableStateOf(false) }
+    var messageToForward by remember { mutableStateOf<Message?>(null) }
+    var chatsForForward by remember { mutableStateOf<List<Chat>>(emptyList()) }
+
+    // Состояния для реакций
+    var showReactionPicker by remember { mutableStateOf<Message?>(null) }
+
+    // Состояния для скролла к сообщению
+    var scrollToMessageId by remember { mutableStateOf<String?>(null) }
+
+    // Состояния для отправки фото
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var isUploading by remember { mutableStateOf(false) }
     var imageCaption by remember { mutableStateOf("") }
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+    var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Лаунчер для выбора изображения из галереи
-    val imagePickerLauncher = rememberLauncherForActivityResult(
+    var showForwardSuccess by remember { mutableStateOf(false) }
+    var forwardedChatName by remember { mutableStateOf("") }
+
+    // Получаем ID сообщения для скролла из savedStateHandle (из поиска)
+    val scrollToMessageIdFromSearch = navController.currentBackStackEntry?.savedStateHandle?.get<String>("scrollToMessageId")
+
+    // Эффект для скролла к сообщению из поиска
+    LaunchedEffect(scrollToMessageIdFromSearch, messages) {
+        scrollToMessageIdFromSearch?.let { messageId ->
+            delay(500) // Даем время загрузиться сообщениям
+            val index = messages.indexOfFirst { it.messageId == messageId }
+            if (index != -1) {
+                listState.scrollToItem(index)
+                // Подсвечиваем сообщение (опционально)
+                scrollToMessageId = messageId
+            }
+            // Очищаем после использования
+            navController.currentBackStackEntry?.savedStateHandle?.remove<String>("scrollToMessageId")
+        }
+    }
+
+    // Функция для создания временного файла для фото
+    fun createImageFile(context: Context): File {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val storageDir = context.cacheDir
+        return File.createTempFile(
+            "JPEG_${timeStamp}_",
+            ".jpg",
+            storageDir
+        ).apply {
+            cameraImageUri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                this
+            )
+        }
+    }
+
+    // Лаунчер для камеры
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            cameraImageUri?.let { uri ->
+                selectedImageUri = uri
+                imageCaption = ""
+            }
+        }
+        cameraImageUri = null
+    }
+
+    // Лаунчер для галереи
+    val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
             selectedImageUri = it
             imageCaption = ""
         }
+    }
+
+    // Эффект для скролла к сообщению при ответе
+    LaunchedEffect(scrollToMessageId) {
+        scrollToMessageId?.let { messageId ->
+            val index = messages.indexOfFirst { it.messageId == messageId }
+            if (index != -1) {
+                delay(100)
+                listState.scrollToItem(index)
+                scrollToMessageId = null
+            }
+        }
+    }
+
+    // Загружаем чаты для пересылки
+    LaunchedEffect(Unit) {
+        viewModel.getChatsForForwarding(currentUserId).collect { chats ->
+            chatsForForward = chats.filter { it.chatId != chatId }
+        }
+    }
+
+    // Диалог выбора источника изображения
+    if (showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageSourceDialog = false },
+            title = { Text("Выберите источник") },
+            text = { Text("Откуда хотите взять изображение?") },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    TextButton(
+                        onClick = {
+                            showImageSourceDialog = false
+                            galleryLauncher.launch("image/*")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Outlined.PhotoLibrary, contentDescription = null)
+                            Text("Галерея")
+                        }
+                    }
+                    TextButton(
+                        onClick = {
+                            showImageSourceDialog = false
+                            val file = createImageFile(context)
+                            cameraLauncher.launch(
+                                Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                                    putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri)
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Outlined.CameraAlt, contentDescription = null)
+                            Text("Камера")
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImageSourceDialog = false }) {
+                    Text("Отмена")
+                }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 
     // Диалог предпросмотра фото
@@ -146,7 +295,7 @@ fun ChatDetailScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         },
-                        colors = TextFieldDefaults.colors(
+                        colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
                         )
@@ -203,6 +352,118 @@ fun ChatDetailScreen(
                 }
             },
             shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    // Диалог пересылки
+    if (showForwardDialog && messageToForward != null) {
+        ForwardMessageDialog(
+            message = messageToForward!!,
+            currentUserId = currentUserId,
+            chats = chatsForForward,
+            onForward = { targetChatId ->
+                val targetChat = chatsForForward.find { it.chatId == targetChatId }
+                val chatDisplayName = when {
+                    targetChat?.type == "personal" -> {
+                        if (targetChat.name.isNotEmpty() && targetChat.name != "Личный чат") {
+                            targetChat.name
+                        } else {
+                            "собеседником"
+                        }
+                    }
+                    else -> targetChat?.name ?: "чат"
+                }
+                forwardedChatName = chatDisplayName
+
+                coroutineScope.launch {
+                    viewModel.forwardMessage(
+                        message = messageToForward!!,
+                        targetChatId = targetChatId,
+                        senderId = currentUserId,
+                        senderName = Firebase.auth.currentUser?.displayName ?: "Вы"
+                    )
+                    showForwardSuccess = true
+                    delay(2000)
+                    showForwardSuccess = false
+                }
+            },
+            onDismiss = {
+                showForwardDialog = false
+                messageToForward = null
+            }
+        )
+    }
+
+    // Уведомление об успешной пересылке
+    if (showForwardSuccess) {
+        LaunchedEffect(showForwardSuccess) {
+            delay(2000)
+            showForwardSuccess = false
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Сообщение переслано в чат \"$forwardedChatName\"",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    TextButton(
+                        onClick = { showForwardSuccess = false }
+                    ) {
+                        Text("OK", color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+    }
+
+    // Показываем палитру реакций
+    if (showReactionPicker != null) {
+        ReactionPickerPopup(
+            onReactionSelected = { reaction ->
+                val message = showReactionPicker!!
+                val existingReaction = message.reactions.find { it.userId == currentUserId }
+                if (existingReaction?.reaction == reaction) {
+                    viewModel.removeReaction(message.messageId, currentUserId)
+                } else {
+                    viewModel.addReaction(message.messageId, currentUserId, reaction)
+                }
+                showReactionPicker = null
+            },
+            onDismiss = { showReactionPicker = null }
         )
     }
 
@@ -312,13 +573,25 @@ fun ChatDetailScreen(
                                 )
                             }
                         }
-                        Text(
-                            text = if (isUserOnline) "В сети"
-                            else if (userLastActive.isNotEmpty()) "Был(а) $userLastActive"
-                            else "Был(а) недавно",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (isUserOnline) "В сети"
+                                else if (userLastActive.isNotEmpty()) "Был(а) $userLastActive"
+                                else "Был(а) недавно",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (totalMessagesCount > 0) {
+                                Text(
+                                    text = " • ${formatMessagesCount(totalMessagesCount)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -326,6 +599,17 @@ fun ChatDetailScreen(
                         Icon(
                             Icons.Default.ArrowBack,
                             contentDescription = "Назад",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        navController.navigate("search_messages/$chatId")
+                    }) {
+                        Icon(
+                            Icons.Outlined.Search,
+                            contentDescription = "Поиск",
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -360,74 +644,9 @@ fun ChatDetailScreen(
                     )
                 }
 
-                // Блок ответа на сообщение
-                AnimatedVisibility(
-                    visible = replyingTo != null,
-                    enter = slideInVertically() + fadeIn(),
-                    exit = slideOutVertically() + fadeOut()
-                ) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                modifier = Modifier.size(32.dp),
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.Reply,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                            Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
-                                Text(
-                                    text = "Ответ для ${replyingTo?.senderName ?: "пользователя"}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = replyingTo?.text?.take(50) ?: "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                            IconButton(
-                                onClick = { viewModel.setReplyingTo(null) },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Отмена",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-
                 // Список сообщений
                 Box(modifier = Modifier.weight(1f)) {
                     if (isLoadingMessages && messages.isEmpty()) {
-                        // Центральный индикатор загрузки (на случай если прогресс-бар не достаточен)
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
@@ -489,6 +708,16 @@ fun ChatDetailScreen(
                                         isMine = msg.senderId == currentUserId,
                                         currentUserId = currentUserId,
                                         onLongClick = { showMenuForMessage = msg },
+                                        onAddReaction = { reaction ->
+                                            viewModel.addReaction(msg.messageId, currentUserId, reaction)
+                                        },
+                                        onRemoveReaction = {
+                                            viewModel.removeReaction(msg.messageId, currentUserId)
+                                        },
+                                        onShowReactionPicker = { showReactionPicker = msg },
+                                        onReplyClick = { replyMessageId ->
+                                            scrollToMessageId = replyMessageId
+                                        },
                                         navController = navController
                                     )
                                 }
@@ -627,111 +856,174 @@ fun ChatDetailScreen(
                     }
                 }
 
-                // Поле ввода с кнопкой для выбора фото (улучшенный дизайн)
+                // Блок ответа на сообщение (ВНИЗУ, перед полем ввода)
+                AnimatedVisibility(
+                    visible = replyingTo != null,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(32.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Outlined.Reply,
+                                        contentDescription = "Ответ",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Ответ для ${replyingTo?.senderName ?: "пользователя"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = replyingTo?.text?.take(60) ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { viewModel.setReplyingTo(null) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Отмена",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Поле ввода
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shadowElevation = 8.dp,
                     tonalElevation = 3.dp,
                     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                 ) {
-                    Column {
-                        // Строка ввода
-                        Row(
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Кнопка выбора фото с диалогом выбора источника
+                        IconButton(
+                            onClick = { showImageSourceDialog = true },
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Кнопка выбора фото с анимацией
-                            IconButton(
-                                onClick = { imagePickerLauncher.launch("image/*") },
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.linearGradient(
-                                            colors = listOf(
-                                                MaterialTheme.colorScheme.primaryContainer,
-                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                                            )
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primaryContainer,
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                                         )
                                     )
-                            ) {
-                                Icon(
-                                    Icons.Default.Image,
-                                    contentDescription = "Выбрать фото",
-                                    tint = MaterialTheme.colorScheme.primary
                                 )
-                            }
+                        ) {
+                            Icon(
+                                Icons.Default.AddPhotoAlternate,
+                                contentDescription = "Добавить фото",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
 
-                            // Поле ввода текста
-                            OutlinedTextField(
-                                value = inputText,
-                                onValueChange = { newText ->
-                                    inputText = newText
-                                    if (newText.isNotBlank()) {
-                                        viewModel.startTyping(chatId, currentUserId)
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { newText ->
+                                inputText = newText
+                                if (newText.isNotBlank()) {
+                                    viewModel.startTyping(chatId, currentUserId)
+                                } else {
+                                    viewModel.stopTyping(chatId, currentUserId)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            placeholder = {
+                                Text(
+                                    if (replyingTo != null) "Введите ответ..." else "Сообщение",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            textStyle = MaterialTheme.typography.bodyLarge
+                        )
+
+                        FloatingActionButton(
+                            onClick = {
+                                if (inputText.isNotBlank()) {
+                                    if (editingMessage != null) {
+                                        viewModel.editMessage(editingMessage!!.messageId, inputText)
+                                        inputText = ""
+                                        viewModel.setEditingMessage(null)
                                     } else {
+                                        shouldScrollToBottom = true
+                                        viewModel.sendMessage(
+                                            chatId = chatId,
+                                            senderId = currentUserId,
+                                            text = inputText,
+                                            replyToId = replyingTo?.messageId ?: "",
+                                            replyToText = replyingTo?.text ?: "",
+                                            replyToSenderName = replyingTo?.senderName ?: ""
+                                        )
+                                        inputText = ""
                                         viewModel.stopTyping(chatId, currentUserId)
                                     }
-                                },
-                                modifier = Modifier.weight(1f),
-                                placeholder = {
-                                    Text(
-                                        if (replyingTo != null) "Введите ответ..." else "Сообщение",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                },
-                                shape = RoundedCornerShape(24.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
-                                ),
-                                textStyle = MaterialTheme.typography.bodyLarge
+                                }
+                            },
+                            modifier = Modifier.size(40.dp),
+                            containerColor = if (inputText.isNotBlank())
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            shape = CircleShape,
+                            elevation = FloatingActionButtonDefaults.elevation(0.dp)
+                        ) {
+                            Icon(
+                                if (editingMessage != null) Icons.Default.Edit else Icons.Default.Send,
+                                contentDescription = if (editingMessage != null) "Сохранить" else "Отправить",
+                                modifier = Modifier.size(20.dp),
+                                tint = if (inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
-
-                            // Кнопка отправки/сохранения
-                            FloatingActionButton(
-                                onClick = {
-                                    if (inputText.isNotBlank()) {
-                                        if (editingMessage != null) {
-                                            viewModel.editMessage(editingMessage!!.messageId, inputText)
-                                            inputText = ""
-                                            viewModel.setEditingMessage(null)
-                                        } else {
-                                            shouldScrollToBottom = true
-                                            viewModel.sendMessage(
-                                                chatId = chatId,
-                                                senderId = currentUserId,
-                                                text = inputText,
-                                                replyToId = replyingTo?.messageId ?: "",
-                                                replyToText = replyingTo?.text ?: "",
-                                                replyToSenderName = replyingTo?.senderName ?: ""
-                                            )
-                                            inputText = ""
-                                            viewModel.stopTyping(chatId, currentUserId)
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.size(40.dp),
-                                containerColor = if (inputText.isNotBlank())
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.surfaceVariant,
-                                shape = CircleShape,
-                                elevation = FloatingActionButtonDefaults.elevation(0.dp)
-                            ) {
-                                Icon(
-                                    if (editingMessage != null) Icons.Default.Edit else Icons.Default.Send,
-                                    contentDescription = if (editingMessage != null) "Сохранить" else "Отправить",
-                                    modifier = Modifier.size(20.dp),
-                                    tint = if (inputText.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                         }
                     }
                 }
@@ -739,7 +1031,7 @@ fun ChatDetailScreen(
         }
     }
 
-    // Меню для сообщения (оставлено без изменений, только улучшен внешний вид)
+    // Меню для сообщения
     if (showMenuForMessage != null) {
         val message = showMenuForMessage!!
         AlertDialog(
@@ -788,6 +1080,18 @@ fun ChatDetailScreen(
                         }
                     }
                     TextButton(
+                        onClick = {
+                            showMenuForMessage = null
+                            messageToForward = message
+                            showForwardDialog = true
+                        }
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Forward, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Text("Переслать")
+                        }
+                    }
+                    TextButton(
                         onClick = { showMenuForMessage = null }
                     ) {
                         Text("Отмена")
@@ -801,10 +1105,14 @@ fun ChatDetailScreen(
 
 @Composable
 fun MessageBubbleModern(
-    message: com.example.devpath.domain.models.Message,
+    message: Message,
     isMine: Boolean,
     currentUserId: String,
     onLongClick: () -> Unit,
+    onAddReaction: (String) -> Unit,
+    onRemoveReaction: () -> Unit,
+    onShowReactionPicker: () -> Unit,
+    onReplyClick: (String) -> Unit = {},
     navController: NavHostController
 ) {
     val timeFormatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -817,18 +1125,16 @@ fun MessageBubbleModern(
     val isRead = message.readBy.contains(currentUserId)
     val isDelivered = message.deliveredTo.contains(currentUserId)
 
-    // Состояние для аватара собеседника
     var friendAvatarUrl by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
-    // Создаем репозиторий напрямую
     val chatRepository = remember {
         com.example.devpath.data.repository.ChatRepository(
             yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
                 context = context,
-                accessKey = com.example.devpath.BuildConfig.YC_ACCESS_KEY,
-                secretKey = com.example.devpath.BuildConfig.YC_SECRET_KEY,
-                bucketName = com.example.devpath.BuildConfig.YC_BUCKET_NAME
+                accessKey = BuildConfig.YC_ACCESS_KEY,
+                secretKey = BuildConfig.YC_SECRET_KEY,
+                bucketName = BuildConfig.YC_BUCKET_NAME
             )
         )
     }
@@ -844,17 +1150,18 @@ fun MessageBubbleModern(
         modifier = Modifier
             .fillMaxWidth()
             .pointerInput(Unit) {
-                detectTapGestures(onLongPress = { onLongClick() })
+                detectTapGestures(
+                    onLongPress = { onLongClick() }
+                )
             },
         horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start
     ) {
-        // Аватар для сообщений собеседника
         if (!isMine) {
             UserAvatar(
                 avatarUrl = friendAvatarUrl,
                 name = message.senderName,
                 size = 36,
-                modifier = Modifier.padding(end = 8.dp) // Вместо margin используем padding
+                modifier = Modifier.padding(end = 8.dp)
             )
         }
 
@@ -872,30 +1179,90 @@ fun MessageBubbleModern(
                 )
             }
 
-            // Блок цитируемого сообщения
-            if (message.replyToId.isNotEmpty() && message.replyToText.isNotEmpty()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Outlined.Reply, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(message.replyToSenderName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
-                        }
-                        Text(message.replyToText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-
-            // Основной пузырь сообщения
+            // Основной пузырь сообщения с цитатой внутри
             Surface(
                 shape = RoundedCornerShape(if (isMine) 20.dp else 20.dp, 4.dp, 20.dp, 20.dp),
                 color = if (isMine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
                 shadowElevation = 2.dp
             ) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+
+                    // Блок цитируемого сообщения (внутри пузыря, сверху)
+                    if (message.replyToId.isNotEmpty() && message.replyToText.isNotEmpty()) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp)
+                                .clickable { onReplyClick(message.replyToId) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isMine)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                // Заголовок с иконкой ответа
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Reply,
+                                        contentDescription = "Ответ",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                        else MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = message.replyToSenderName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                        else MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // Текст цитируемого сообщения
+                                Text(
+                                    text = if (message.replyToText.isNotEmpty()) message.replyToText else "📷 Изображение",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isMine)
+                                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                    else
+                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    // Индикатор пересланного сообщения
+                    if (message.isForwarded) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.Forward,
+                                contentDescription = "Переслано",
+                                modifier = Modifier.size(12.dp),
+                                tint = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Пересланное сообщение",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+
+                    // Изображение
                     if (message.imageUrl.isNotEmpty()) {
                         AsyncImage(
                             model = message.imageUrl,
@@ -914,6 +1281,7 @@ fun MessageBubbleModern(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 
+                    // Текст сообщения
                     if (message.text.isNotEmpty()) {
                         Text(
                             text = message.text,
@@ -922,6 +1290,7 @@ fun MessageBubbleModern(
                         )
                     }
 
+                    // Время и статусы
                     Row(
                         modifier = Modifier.padding(top = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -958,13 +1327,42 @@ fun MessageBubbleModern(
                             }
                         }
                     }
+
+                    // Реакции
+                    if (message.reactions.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        MessageReactions(
+                            reactions = message.reactions,
+                            currentUserId = currentUserId,
+                            onAddReaction = onAddReaction,
+                            onRemoveReaction = onRemoveReaction
+                        )
+                    }
+                }
+            }
+
+            // Кнопка добавления реакции
+            Surface(
+                modifier = Modifier
+                    .size(28.dp)
+                    .padding(top = 2.dp)
+                    .clip(CircleShape)
+                    .clickable { onShowReactionPicker() },
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Outlined.EmojiEmotions,
+                        contentDescription = "Добавить реакцию",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
     }
 }
 
-// Вспомогательная функция (оставлена для совместимости)
 private fun formatMessagesCount(count: Long): String {
     return when {
         count == 0L -> "Нет сообщений"

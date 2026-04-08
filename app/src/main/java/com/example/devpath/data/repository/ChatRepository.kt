@@ -15,9 +15,11 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.google.firebase.Timestamp
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,6 +39,7 @@ class ChatRepository @Inject constructor(
         var query2Completed = false
 
         fun checkAndSend() {
+
             if (query1Completed && query2Completed) {
                 if (friendIds.isEmpty()) {
                     trySend(emptyList())
@@ -128,6 +131,159 @@ class ChatRepository @Inject constructor(
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+
+    suspend fun addReaction(messageId: String, userId: String, reaction: String): Boolean {
+        return try {
+            val newReaction = Reaction(
+                userId = userId,
+                reaction = reaction,
+                timestamp = Timestamp.now()  // ← теперь работает
+            )
+
+            val messageRef = db.collection("messages").document(messageId)
+
+            // Получаем текущие реакции
+            val snapshot = messageRef.get().await()
+            val currentReactions = snapshot.get("reactions") as? List<Map<String, Any>> ?: emptyList()
+
+            // Удаляем старую реакцию пользователя, если есть
+            val updatedReactions = currentReactions.filterNot {
+                (it["userId"] as? String) == userId
+            }.map { it.toMutableMap() } + mapOf(
+                "userId" to userId,
+                "reaction" to reaction,
+                "timestamp" to Timestamp.now()
+            )
+
+            messageRef.update("reactions", updatedReactions).await()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    suspend fun removeReaction(messageId: String, userId: String): Boolean {
+        return try {
+            val snapshot = db.collection("messages").document(messageId).get().await()
+            val currentReactions = snapshot.get("reactions") as? List<Map<String, Any>> ?: emptyList()
+            val updatedReactions = currentReactions.filterNot {
+                (it["userId"] as? String) == userId
+            }
+
+            db.collection("messages").document(messageId).update("reactions", updatedReactions).await()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // Пересылка сообщений с возвратом результата
+    suspend fun forwardMessage(
+        originalMessage: Message,
+        targetChatId: String,
+        senderId: String,
+        senderName: String
+    ): Boolean {
+        return try {
+            val forwardedMessage = Message(
+                chatId = targetChatId,
+                senderId = senderId,
+                senderName = senderName,
+                text = originalMessage.text,
+                imageUrl = originalMessage.imageUrl,
+                timestamp = Timestamp.now(),
+                readBy = emptyList(),
+                deliveredTo = listOf(senderId),
+                isForwarded = true,
+                forwardedFrom = originalMessage.messageId,
+                forwardedFromChatId = originalMessage.chatId
+            )
+
+            db.collection("messages").add(forwardedMessage).await()
+
+            // Получаем название чата для отображения в уведомлении
+            val chat = getChat(targetChatId)
+            val chatDisplayName = when {
+                chat?.type == "personal" -> {
+                    val otherUserId = chat.participants.firstOrNull { it != senderId }
+                    if (otherUserId != null) {
+                        val user = getUser(otherUserId)
+                        user?.name ?: "Пользователь"
+                    } else {
+                        "Личный чат"
+                    }
+                }
+                else -> chat?.name ?: "Чат"
+            }
+
+            // Обновляем последнее сообщение в чате
+            db.collection("chats").document(targetChatId)
+                .update(
+                    mapOf(
+                        "lastMessage" to if (originalMessage.text.isNotEmpty())
+                            "📎 Пересланное: ${originalMessage.text.take(50)}"
+                        else "📎 Пересланное изображение",
+                        "lastMessageSender" to senderName,
+                        "lastMessageTime" to Timestamp.now()
+                    )
+                )
+                .await()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+
+    // Более эффективный запрос (после создания индекса)
+    suspend fun searchMessages(
+        chatId: String,
+        query: String,
+        senderId: String? = null,
+        startDate: Timestamp? = null,
+        endDate: Timestamp? = null
+    ): List<Message> {
+        return try {
+            var firestoreQuery = db.collection("messages")
+                .whereEqualTo("chatId", chatId)
+                .whereEqualTo("deleted", false)
+
+            // Поиск по тексту
+            if (query.isNotEmpty()) {
+                firestoreQuery = firestoreQuery
+                    .whereGreaterThanOrEqualTo("text", query)
+                    .whereLessThanOrEqualTo("text", query + "\uf8ff")
+            }
+
+            // Применяем остальные фильтры
+            if (!senderId.isNullOrEmpty()) {
+                firestoreQuery = firestoreQuery.whereEqualTo("senderId", senderId)
+            }
+
+            startDate?.let {
+                firestoreQuery = firestoreQuery.whereGreaterThanOrEqualTo("timestamp", it)
+            }
+            endDate?.let {
+                firestoreQuery = firestoreQuery.whereLessThanOrEqualTo("timestamp", it)
+            }
+
+            val snapshot = firestoreQuery
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(50)
+                .get()
+                .await()
+
+            snapshot.documents.mapNotNull { doc ->
+                doc.toObject(Message::class.java)?.copy(messageId = doc.id)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
         }
     }
 

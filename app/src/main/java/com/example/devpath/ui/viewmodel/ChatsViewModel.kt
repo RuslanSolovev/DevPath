@@ -9,12 +9,18 @@ import com.example.devpath.data.repository.ChatRepository
 import com.example.devpath.domain.models.Chat
 import com.example.devpath.domain.models.FriendRequest
 import com.example.devpath.domain.models.Message
+import com.example.devpath.domain.models.Reaction
 import com.example.devpath.domain.models.UserProfile
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,8 +28,6 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.channels.awaitClose
 
 @HiltViewModel
 class ChatsViewModel @Inject constructor(
@@ -80,12 +84,46 @@ class ChatsViewModel @Inject constructor(
     private val _isUserOnline = MutableStateFlow(false)
     val isUserOnline: StateFlow<Boolean> = _isUserOnline.asStateFlow()
 
-    private var typingTimeoutJob: kotlinx.coroutines.Job? = null
+    private var typingTimeoutJob: Job? = null
 
     private val _userLastActive = MutableStateFlow("")
     val userLastActive: StateFlow<String> = _userLastActive.asStateFlow()
 
+    // Для поиска сообщений (отдельный StateFlow)
+    private val _messageSearchResults = MutableStateFlow<List<Message>>(emptyList())
+    val messageSearchResults: StateFlow<List<Message>> = _messageSearchResults.asStateFlow()
 
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+
+    fun searchMessagesInChat(
+        chatId: String,
+        query: String,
+        senderId: String? = null,
+        startDate: Timestamp? = null,
+        endDate: Timestamp? = null
+    ) {
+        viewModelScope.launch {
+            _isSearching.value = true
+            val results = chatRepository.searchMessages(chatId, query, senderId, startDate, endDate)
+            _messageSearchResults.value = results
+            _isSearching.value = false
+        }
+    }
+
+    // Пересылка сообщений с возвратом результата
+    suspend fun forwardMessage(
+        message: Message,
+        targetChatId: String,
+        senderId: String,
+        senderName: String
+    ): Boolean {
+        return chatRepository.forwardMessage(message, targetChatId, senderId, senderName)
+    }
+
+    fun clearMessageSearchResults() {
+        _messageSearchResults.value = emptyList()
+    }
 
     // Добавьте этот метод в ChatsViewModel
     fun sendImageMessageWithText(
@@ -115,6 +153,40 @@ class ChatsViewModel @Inject constructor(
                 _isLoading.value = false
             }
         }
+    }
+
+    // Reactions
+    fun addReaction(messageId: String, userId: String, reaction: String) {
+        viewModelScope.launch {
+            chatRepository.addReaction(messageId, userId, reaction)
+            // Обновляем локальное состояние
+            _messages.value = _messages.value.map { message ->
+                if (message.messageId == messageId) {
+                    val existingReactions = message.reactions.filterNot { it.userId == userId }
+                    message.copy(reactions = existingReactions + Reaction(userId, reaction, Timestamp.now()))
+                } else {
+                    message
+                }
+            }
+        }
+    }
+
+    fun removeReaction(messageId: String, userId: String) {
+        viewModelScope.launch {
+            chatRepository.removeReaction(messageId, userId)
+            _messages.value = _messages.value.map { message ->
+                if (message.messageId == messageId) {
+                    message.copy(reactions = message.reactions.filterNot { it.userId == userId })
+                } else {
+                    message
+                }
+            }
+        }
+    }
+
+
+    fun getChatsForForwarding(userId: String): Flow<List<Chat>> {
+        return chatRepository.getChats(userId)
     }
 
     fun observeUserLastActive(userId: String) {
@@ -334,7 +406,7 @@ class ChatsViewModel @Inject constructor(
             senderId = senderId,
             senderName = "Вы",
             text = text,
-            timestamp = com.google.firebase.Timestamp.now(),
+            timestamp = Timestamp.now(),
             readBy = emptyList(),
             deliveredTo = emptyList(),
             replyToId = replyToId,
@@ -493,7 +565,7 @@ class ChatsViewModel @Inject constructor(
     fun deleteChat(chatId: String) {
         viewModelScope.launch {
             chatRepository.deleteChat(chatId)
-            val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+            val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
             loadChats(currentUserId)
         }
     }

@@ -46,6 +46,8 @@
             </intent-filter>
         </activity>
 
+
+
         <!-- ✅ FileProvider для шаринга изображений и сохранения -->
         <provider
             android:name="androidx.core.content.FileProvider"

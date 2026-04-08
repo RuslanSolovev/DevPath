@@ -1,14 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- Для временных файлов в кэше -->
     <cache-path name="cache" path="/" />
-
-    <!-- Для сохранения в Pictures -->
-    <external-files-path name="external_files" path="Pictures/" />
-
-    <!-- Для внешнего хранилища (старые версии Android) -->
-    <external-path name="external" path="." />
-
-    <!-- Для файлов в папке приложения -->
     <files-path name="files" path="/" />
+    <external-files-path name="external_files" path="/" />
+    <external-cache-path name="external_cache" path="/" />
 </paths>

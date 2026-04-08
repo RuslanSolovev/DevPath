@@ -2,6 +2,12 @@ package com.example.devpath.domain.models
 
 import com.google.firebase.Timestamp
 
+data class Reaction(
+    val userId: String = "",
+    val reaction: String = "", // 👍, ❤️, 😂, 😮, 😢, 😡
+    val timestamp: Timestamp = Timestamp.now()
+)
+
 data class Message(
     val messageId: String = "",
     val chatId: String = "",
@@ -15,7 +21,11 @@ data class Message(
     val imageUrl: String = "",
     val replyToText: String = "",
     val replyToSenderName: String = "",
-    val edited: Boolean = false,        // ← было isEdited, стало edited
+    val edited: Boolean = false,
     val editedAt: Timestamp? = null,
-    val deleted: Boolean = false        // ← было isDeleted, стало deleted
+    val deleted: Boolean = false,
+    val reactions: List<Reaction> = emptyList(), // Добавляем реакции
+    val forwardedFrom: String = "", // ID исходного сообщения при пересылке
+    val forwardedFromChatId: String = "", // Откуда переслано
+    val isForwarded: Boolean = false // Флаг пересланного сообщения
 )
