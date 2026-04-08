@@ -30,11 +30,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
+import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.viewmodel.ChatsViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
@@ -815,6 +817,29 @@ fun MessageBubbleModern(
     val isRead = message.readBy.contains(currentUserId)
     val isDelivered = message.deliveredTo.contains(currentUserId)
 
+    // Состояние для аватара собеседника
+    var friendAvatarUrl by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+
+    // Создаем репозиторий напрямую
+    val chatRepository = remember {
+        com.example.devpath.data.repository.ChatRepository(
+            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
+                context = context,
+                accessKey = com.example.devpath.BuildConfig.YC_ACCESS_KEY,
+                secretKey = com.example.devpath.BuildConfig.YC_SECRET_KEY,
+                bucketName = com.example.devpath.BuildConfig.YC_BUCKET_NAME
+            )
+        )
+    }
+
+    LaunchedEffect(message.senderId) {
+        if (!isMine) {
+            val userProfile = chatRepository.getUser(message.senderId)
+            friendAvatarUrl = userProfile?.avatarUrl
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -825,22 +850,12 @@ fun MessageBubbleModern(
     ) {
         // Аватар для сообщений собеседника
         if (!isMine) {
-            Surface(
-                modifier = Modifier
-                    .size(36.dp)
-                    .padding(end = 8.dp),  // ✅ Было .margin() — исправлено на .padding()
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = message.senderName.take(2).uppercase(),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+            UserAvatar(
+                avatarUrl = friendAvatarUrl,
+                name = message.senderName,
+                size = 36,
+                modifier = Modifier.padding(end = 8.dp) // Вместо margin используем padding
+            )
         }
 
         Column(
@@ -869,7 +884,7 @@ fun MessageBubbleModern(
                             Icon(Icons.Outlined.Reply, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(message.replyToSenderName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                         }
-                        Text(message.replyToText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text(message.replyToText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

@@ -17,11 +17,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import com.example.devpath.BuildConfig
 import com.example.devpath.domain.models.UserProfile
+import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.viewmodel.ChatsViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
@@ -40,11 +43,37 @@ fun SearchFriendsScreen(
 
     var query by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // Создаем репозиторий для получения аватаров
+    val chatRepository = remember {
+        com.example.devpath.data.repository.ChatRepository(
+            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
+                context = context,
+                accessKey = BuildConfig.YC_ACCESS_KEY,
+                secretKey = BuildConfig.YC_SECRET_KEY,
+                bucketName = BuildConfig.YC_BUCKET_NAME
+            )
+        )
+    }
+
+    // Состояния для аватаров пользователей
+    var userAvatars by remember { mutableStateOf<Map<String, String?>>(emptyMap()) }
 
     LaunchedEffect(Unit) {
         viewModel.loadFriends(currentUserId)
         viewModel.loadIncomingRequests(currentUserId)
         viewModel.loadSentRequests(currentUserId)
+    }
+
+    // Загружаем аватары для результатов поиска
+    LaunchedEffect(searchResults) {
+        val avatars = mutableMapOf<String, String?>()
+        for (user in searchResults) {
+            val profile = chatRepository.getUser(user.userId)
+            avatars[user.userId] = profile?.avatarUrl
+        }
+        userAvatars = avatars
     }
 
     fun normalizeString(str: String): String = str.trim().lowercase()
@@ -286,6 +315,7 @@ fun SearchFriendsScreen(
                         items(filteredResults, key = { it.userId }) { user ->
                             UserSearchItemModern(
                                 user = user,
+                                avatarUrl = userAvatars[user.userId],
                                 onSendRequest = {
                                     viewModel.sendFriendRequest(currentUserId, user.userId)
                                     navController.popBackStack()
@@ -302,6 +332,7 @@ fun SearchFriendsScreen(
 @Composable
 fun UserSearchItemModern(
     user: UserProfile,
+    avatarUrl: String?,
     onSendRequest: () -> Unit
 ) {
     Card(
@@ -320,27 +351,12 @@ fun UserSearchItemModern(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = user.name.take(2).uppercase(),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = MaterialTheme.typography.titleLarge.fontSize
-                )
-            }
+            // Аватар пользователя
+            UserAvatar(
+                avatarUrl = avatarUrl,
+                name = user.name,
+                size = 56
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 

@@ -5,9 +5,9 @@ import com.google.firebase.Timestamp
 data class UserProfile(
     val userId: String = "",
     val name: String = "",
-    val nameLowercase: String = "",      // ← добавить
+    val nameLowercase: String = "",
     val email: String = "",
-    val emailLowercase: String = "",     // ← добавить
+    val emailLowercase: String = "",
     val avatarUrl: String? = null,
     val online: Boolean = false,
     val lastSeen: Timestamp = Timestamp.now(),

@@ -18,12 +18,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import com.example.devpath.BuildConfig
 import com.example.devpath.domain.models.FriendRequest
 import com.example.devpath.domain.models.UserProfile
+import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.viewmodel.ChatsViewModel
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
@@ -45,7 +48,44 @@ fun FriendsScreen(
     val tabs = listOf("Друзья", "Заявки ко мне", "Мои заявки")
 
     var selectedFriend by remember { mutableStateOf<UserProfile?>(null) }
-    var showDialog by remember { mutableStateOf(false) }
+    var showFriendDialog by remember { mutableStateOf(false) }
+
+    // Состояния для загрузки данных отправителей/получателей заявок
+    var requestSenders by remember { mutableStateOf<Map<String, UserProfile>>(emptyMap()) }
+    var requestReceivers by remember { mutableStateOf<Map<String, UserProfile>>(emptyMap()) }
+    val context = LocalContext.current
+
+    val chatRepository = remember {
+        com.example.devpath.data.repository.ChatRepository(
+            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
+                context = context,
+                accessKey = BuildConfig.YC_ACCESS_KEY,
+                secretKey = BuildConfig.YC_SECRET_KEY,
+                bucketName = BuildConfig.YC_BUCKET_NAME
+            )
+        )
+    }
+
+    // Загружаем данные пользователей для заявок
+    LaunchedEffect(incomingRequests, sentRequests) {
+        val senders = mutableMapOf<String, UserProfile>()
+        for (request in incomingRequests) {
+            val user = chatRepository.getUser(request.fromUserId)
+            if (user != null) {
+                senders[request.requestId] = user
+            }
+        }
+        requestSenders = senders
+
+        val receivers = mutableMapOf<String, UserProfile>()
+        for (request in sentRequests) {
+            val user = chatRepository.getUser(request.toUserId)
+            if (user != null) {
+                receivers[request.requestId] = user
+            }
+        }
+        requestReceivers = receivers
+    }
 
     LaunchedEffect(Unit) {
         viewModel.loadFriends(currentUserId)
@@ -125,7 +165,6 @@ fun FriendsScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Современные табы
             TabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = MaterialTheme.colorScheme.surface,
@@ -161,34 +200,54 @@ fun FriendsScreen(
                     navController = navController,
                     onFriendClick = { friend ->
                         selectedFriend = friend
-                        showDialog = true
+                        showFriendDialog = true
                     }
                 )
-                1 -> IncomingRequestsList(incomingRequests, currentUserId, viewModel)
-                2 -> SentRequestsList(sentRequests, viewModel)
+                1 -> IncomingRequestsList(
+                    requests = incomingRequests,
+                    requestUsers = requestSenders,
+                    onAccept = { requestId, fromUserId, toUserId ->
+                        viewModel.acceptFriendRequest(requestId, fromUserId, toUserId)
+                    },
+                    onReject = { requestId ->
+                        viewModel.rejectFriendRequest(requestId)
+                    }
+                )
+                2 -> SentRequestsList(
+                    requests = sentRequests,
+                    requestUsers = requestReceivers
+                )
             }
         }
     }
 
-    if (showDialog && selectedFriend != null) {
+    // Диалог для друга (Написать сообщение / Удалить из друзей)
+    if (showFriendDialog && selectedFriend != null) {
         AlertDialog(
             onDismissRequest = {
-                showDialog = false
+                showFriendDialog = false
                 selectedFriend = null
             },
             title = {
-                Text(
-                    selectedFriend?.name?.ifEmpty { "Пользователь" } ?: "Пользователь",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    UserAvatar(
+                        avatarUrl = selectedFriend?.avatarUrl,
+                        name = selectedFriend?.name ?: "Пользователь",
+                        size = 40
+                    )
+                    Text(
+                        selectedFriend?.name?.ifEmpty { "Пользователь" } ?: "Пользователь",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             },
             text = { Text("Выберите действие") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         val friend = selectedFriend ?: return@TextButton
-                        showDialog = false
+                        showFriendDialog = false
                         viewModel.createChatAndNavigate(
                             currentUserId = currentUserId,
                             friendId = friend.userId,
@@ -207,18 +266,18 @@ fun FriendsScreen(
                 TextButton(
                     onClick = {
                         val friend = selectedFriend ?: return@TextButton
-                        showDialog = false
-                        viewModel.createChatAndNavigate(
-                            currentUserId = currentUserId,
-                            friendId = friend.userId,  // ← передаём friendId
-                            navController = navController
-                        )
+                        showFriendDialog = false
+                        // Удаляем из друзей
+                        viewModel.removeFriend(currentUserId, friend.userId)
                         selectedFriend = null
-                    }
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Outlined.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("Написать сообщение")
+                        Icon(Icons.Outlined.PersonRemove, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("Удалить из друзей")
                     }
                 }
             },
@@ -304,6 +363,31 @@ fun FriendItemModern(
     friend: UserProfile,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    var isOnline by remember { mutableStateOf(false) }
+    var lastActiveFormatted by remember { mutableStateOf("") }
+
+    val chatRepository = remember {
+        com.example.devpath.data.repository.ChatRepository(
+            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
+                context = context,
+                accessKey = BuildConfig.YC_ACCESS_KEY,
+                secretKey = BuildConfig.YC_SECRET_KEY,
+                bucketName = BuildConfig.YC_BUCKET_NAME
+            )
+        )
+    }
+
+    LaunchedEffect(friend.userId) {
+        chatRepository.observeUserOnlineStatus(friend.userId).collect { online ->
+            isOnline = online
+        }
+    }
+
+    LaunchedEffect(friend.userId) {
+        lastActiveFormatted = chatRepository.getUserLastActiveFormatted(friend.userId)
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -320,28 +404,13 @@ fun FriendItemModern(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Аватар друга
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = friend.name.take(2).uppercase(),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = MaterialTheme.typography.titleLarge.fontSize
-                )
-            }
+            UserAvatar(
+                avatarUrl = friend.avatarUrl,
+                name = friend.name,
+                size = 56,
+                showOnlineIndicator = true,
+                isOnline = isOnline
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -356,9 +425,9 @@ fun FriendItemModern(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = friend.email,
+                    text = if (isOnline) "В сети" else "Был(а) $lastActiveFormatted",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isOnline) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
@@ -385,8 +454,9 @@ fun FriendItemModern(
 @Composable
 fun IncomingRequestsList(
     requests: List<FriendRequest>,
-    currentUserId: String,
-    viewModel: ChatsViewModel
+    requestUsers: Map<String, UserProfile>,
+    onAccept: (requestId: String, fromUserId: String, toUserId: String) -> Unit,
+    onReject: (requestId: String) -> Unit
 ) {
     if (requests.isEmpty()) {
         Box(
@@ -426,115 +496,14 @@ fun IncomingRequestsList(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(requests, key = { it.requestId }) { request ->
+                val user = requestUsers[request.requestId]
                 RequestItemModern(
                     request = request,
-                    onAccept = {
-                        viewModel.acceptFriendRequest(
-                            request.requestId,
-                            request.fromUserId,
-                            request.toUserId
-                        )
-                    },
-                    onReject = {
-                        viewModel.rejectFriendRequest(request.requestId)
-                    }
+                    user = user,
+                    type = "incoming",
+                    onAccept = { onAccept(request.requestId, request.fromUserId, request.toUserId) },
+                    onReject = { onReject(request.requestId) }
                 )
-            }
-        }
-    }
-}
-
-@Composable
-fun RequestItemModern(
-    request: FriendRequest,
-    onAccept: () -> Unit,
-    onReject: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Outlined.PersonAdd,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = "Заявка в друзья",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = formatDate(request.createdAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                    onClick = onAccept
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Outlined.Check,
-                            contentDescription = "Принять",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-                Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
-                    onClick = onReject
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Outlined.Close,
-                            contentDescription = "Отклонить",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
             }
         }
     }
@@ -543,7 +512,7 @@ fun RequestItemModern(
 @Composable
 fun SentRequestsList(
     requests: List<FriendRequest>,
-    viewModel: ChatsViewModel
+    requestUsers: Map<String, UserProfile>
 ) {
     if (requests.isEmpty()) {
         Box(
@@ -583,14 +552,25 @@ fun SentRequestsList(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(requests, key = { it.requestId }) { request ->
-                SentRequestItemModern(request = request)
+                val user = requestUsers[request.requestId]
+                RequestItemModern(
+                    request = request,
+                    user = user,
+                    type = "sent"
+                )
             }
         }
     }
 }
 
 @Composable
-fun SentRequestItemModern(request: FriendRequest) {
+fun RequestItemModern(
+    request: FriendRequest,
+    user: UserProfile?,
+    type: String, // "incoming" или "sent"
+    onAccept: (() -> Unit)? = null,
+    onReject: (() -> Unit)? = null
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -605,28 +585,12 @@ fun SentRequestItemModern(request: FriendRequest) {
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors = when (request.status) {
-                                "pending" -> listOf(Color(0xFFFFC107), Color(0xFFFFC107).copy(alpha = 0.7f))
-                                "accepted" -> listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                                else -> listOf(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
-                            }
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Outlined.Send,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
+            // Аватар пользователя
+            UserAvatar(
+                avatarUrl = user?.avatarUrl,
+                name = user?.name ?: "Пользователь",
+                size = 56
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -635,11 +599,15 @@ fun SentRequestItemModern(request: FriendRequest) {
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = when (request.status) {
-                        "pending" -> "Заявка отправлена"
-                        "accepted" -> "Заявка принята"
-                        "rejected" -> "Заявка отклонена"
-                        else -> "Заявка"
+                    text = if (type == "incoming") {
+                        "${user?.name ?: "Пользователь"} хочет добавить вас в друзья"
+                    } else {
+                        when (request.status) {
+                            "pending" -> "Заявка отправлена пользователю ${user?.name ?: "Пользователь"}"
+                            "accepted" -> "Пользователь ${user?.name ?: "Пользователь"} принял вашу заявку"
+                            "rejected" -> "Пользователь ${user?.name ?: "Пользователь"} отклонил заявку"
+                            else -> "Заявка"
+                        }
                     },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
@@ -651,7 +619,40 @@ fun SentRequestItemModern(request: FriendRequest) {
                 )
             }
 
-            if (request.status == "accepted") {
+            if (type == "incoming" && request.status == "pending") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        onClick = { onAccept?.invoke() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Outlined.Check,
+                                contentDescription = "Принять",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                        onClick = { onReject?.invoke() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Outlined.Close,
+                                contentDescription = "Отклонить",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            } else if (request.status == "accepted") {
                 Surface(
                     modifier = Modifier.size(32.dp),
                     shape = CircleShape,

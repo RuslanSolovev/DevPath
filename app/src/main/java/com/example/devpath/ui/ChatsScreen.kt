@@ -19,13 +19,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import com.example.devpath.BuildConfig
+import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.viewmodel.ChatsViewModel
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import kotlinx.coroutines.delay
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -271,6 +277,49 @@ fun ChatItemModern(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    var friendAvatarUrl by remember { mutableStateOf<String?>(null) }
+    var friendName by remember { mutableStateOf("") }
+    var isFriendOnline by remember { mutableStateOf(false) }
+
+    val currentUserId = Firebase.auth.currentUser?.uid ?: ""
+    val context = LocalContext.current
+
+    // Создаем репозиторий напрямую
+    val chatRepository = remember {
+        com.example.devpath.data.repository.ChatRepository(
+            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
+                context = context,
+                accessKey = BuildConfig.YC_ACCESS_KEY,
+                secretKey = BuildConfig.YC_SECRET_KEY,
+                bucketName = BuildConfig.YC_BUCKET_NAME
+            )
+        )
+    }
+
+    // Загружаем данные о друге для личных чатов
+    LaunchedEffect(chat.chatId, chat.type) {
+        if (chat.type == "personal") {
+            val friendId = chat.participants.firstOrNull { it != currentUserId }
+            if (friendId != null) {
+                val friend = chatRepository.getUser(friendId)
+                friendAvatarUrl = friend?.avatarUrl
+                friendName = friend?.name ?: chat.name
+            }
+        }
+    }
+
+    // Отдельный LaunchedEffect для онлайн статуса
+    LaunchedEffect(chat.chatId, chat.type) {
+        if (chat.type == "personal") {
+            val friendId = chat.participants.firstOrNull { it != currentUserId }
+            if (friendId != null) {
+                chatRepository.observeUserOnlineStatus(friendId).collect { online ->
+                    isFriendOnline = online
+                }
+            }
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -291,26 +340,39 @@ fun ChatItemModern(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Аватар чата
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                            )
+            when {
+                chat.type == "personal" -> {
+                    UserAvatar(
+                        avatarUrl = friendAvatarUrl,
+                        name = friendName.ifEmpty { chat.name },
+                        size = 56,
+                        showOnlineIndicator = true,
+                        isOnline = isFriendOnline
+                    )
+                }
+                else -> {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.Group,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp)
                         )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    if (chat.type == "personal") Icons.Outlined.Person else Icons.Outlined.Group,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -324,7 +386,7 @@ fun ChatItemModern(
                 Text(
                     text = when {
                         chat.type == "personal" -> {
-                            if (chat.name.isNotEmpty()) chat.name else "Личный чат"
+                            if (friendName.isNotEmpty()) friendName else chat.name.ifEmpty { "Личный чат" }
                         }
                         chat.name.isNotEmpty() -> chat.name
                         else -> "Групповой чат"

@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import com.example.devpath.ui.components.UserAvatar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 
@@ -289,6 +290,8 @@ fun HomeTabScreen(
     var currentAnnouncementIndex by remember { mutableStateOf(0) }
     var showCreateDialog by remember { mutableStateOf(false) }
 
+    var userProfile by remember { mutableStateOf<com.example.devpath.domain.models.UserProfile?>(null) }
+
     val OWNER_ID = "nPX20T5lVTVQzjLTINkLp0f9xxI2"
 
     LaunchedEffect(Unit) {
@@ -307,9 +310,11 @@ fun HomeTabScreen(
         if (currentUser != null) {
             isLoading = true
             try {
-                val userProfile = chatRepository.getUser(currentUser.uid)
-                displayName = userProfile?.name ?: currentUser.displayName ?: ""
+                val userProfileData = chatRepository.getUser(currentUser.uid)
+                userProfile = userProfileData
+                displayName = userProfileData?.name ?: currentUser.displayName ?: ""
                 println("DEBUG: Загружено имя из Firestore: $displayName")
+                println("DEBUG: Загружен аватар: ${userProfileData?.avatarUrl}")
             } catch (e: Exception) {
                 e.printStackTrace()
                 displayName = currentUser.displayName ?: ""
@@ -364,20 +369,15 @@ fun HomeTabScreen(
                         .clickable { onNavigateToProfile() },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (!isLoading) displayName.take(2).uppercase() else "?",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    // Аватар пользователя
+                    UserAvatar(
+                        avatarUrl = userProfile?.avatarUrl,
+                        name = displayName,
+                        size = 48
+                    )
+
                     Spacer(modifier = Modifier.width(12.dp))
+
                     Column {
                         if (isLoading) {
                             Text(

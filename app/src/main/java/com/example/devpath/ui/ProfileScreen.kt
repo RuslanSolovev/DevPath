@@ -1,8 +1,12 @@
 package com.example.devpath.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -21,15 +25,20 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.example.devpath.R
 import com.example.devpath.domain.models.UserProgress
+import com.example.devpath.domain.models.UserProfile
 import com.google.firebase.auth.ktx.auth
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -43,33 +52,193 @@ fun ProfileScreen(
     onNavigateToTabs: () -> Unit
 ) {
     val currentUser = Firebase.auth.currentUser
+    val context = LocalContext.current
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
     val coroutineScope = rememberCoroutineScope()
 
+    // ChatRepository для работы с аватарами
+    val chatRepository = remember {
+        com.example.devpath.data.repository.ChatRepository(
+            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
+                context = context,
+                accessKey = com.example.devpath.BuildConfig.YC_ACCESS_KEY,
+                secretKey = com.example.devpath.BuildConfig.YC_SECRET_KEY,
+                bucketName = com.example.devpath.BuildConfig.YC_BUCKET_NAME
+            )
+        )
+    }
+
     // Загружаем существующий прогресс пользователя
     var existingProgress by remember { mutableStateOf<UserProgress?>(null) }
+    var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var displayName by remember { mutableStateOf("") }
+    var avatarUrl by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var isUploadingAvatar by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showSuccess by remember { mutableStateOf(false) }
 
-    // Загружаем существующий прогресс при входе (только локально)
+    // Состояние для выбора изображения
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var showAvatarDialog by remember { mutableStateOf(false) }
+
+    // Лаунчер для выбора изображения из галереи
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            selectedImageUri = it
+            showAvatarDialog = true
+        }
+    }
+
+    // Загружаем существующий прогресс и профиль при входе
     LaunchedEffect(Unit) {
         if (currentUser != null) {
             try {
-                // Используем loadLocalProgress для офлайн-загрузки
+                // Загружаем прогресс
                 val progress = progressRepo.loadLocalProgress(currentUser.uid)
                 existingProgress = progress
-                // Используем существующее имя, если есть
                 displayName = progress?.displayName ?: currentUser.displayName ?: ""
-                println("DEBUG: Загружен существующий прогресс: уроков=${progress?.completedLessons?.size ?: 0}, XP=${progress?.totalXP ?: 0}")
+
+                // Загружаем профиль пользователя из Firestore
+                val profile = chatRepository.getUser(currentUser.uid)
+                userProfile = profile
+                avatarUrl = profile?.avatarUrl
+
+                println("DEBUG: Загружен профиль: аватар=${avatarUrl}")
             } catch (e: Exception) {
-                println("DEBUG: Ошибка загрузки прогресса: ${e.message}")
-                // Даже при ошибке, используем имя из Firebase Auth
+                println("DEBUG: Ошибка загрузки: ${e.message}")
                 displayName = currentUser.displayName ?: ""
             }
         }
+    }
+
+    // Диалог для подтверждения загрузки аватара
+    if (showAvatarDialog && selectedImageUri != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showAvatarDialog = false
+                selectedImageUri = null
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.AccountCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Установить аватар", style = MaterialTheme.typography.titleMedium)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Превью изображения
+                    Card(
+                        modifier = Modifier
+                            .size(200.dp)
+                            .shadow(8.dp, CircleShape),
+                        shape = CircleShape,
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
+                        AsyncImage(
+                            model = selectedImageUri,
+                            contentDescription = "Превью аватара",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    Text(
+                        text = "Это изображение будет использоваться как ваш аватар",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            isUploadingAvatar = true
+                            try {
+                                selectedImageUri?.let { uri ->
+                                    // Загружаем изображение в Yandex Cloud
+                                    val imageUrl = chatRepository.uploadImageAndGetUrl(uri, context.contentResolver)
+
+                                    // Сохраняем URL аватара в Firestore
+                                    val db = Firebase.firestore
+                                    val userDocRef = db.collection("users").document(currentUser!!.uid)
+                                    userDocRef.update("avatarUrl", imageUrl).await()
+
+                                    // Обновляем локальное состояние
+                                    avatarUrl = imageUrl
+                                    userProfile = userProfile?.copy(avatarUrl = imageUrl)
+
+                                    // Показываем сообщение об успехе
+                                    showSuccess = true
+                                    isUploadingAvatar = false
+                                    showAvatarDialog = false
+                                    selectedImageUri = null
+
+                                    // Скрываем сообщение через 2 секунды
+                                    kotlinx.coroutines.delay(2000)
+                                    showSuccess = false
+                                }
+                            } catch (e: Exception) {
+                                errorMessage = "Ошибка загрузки аватара: ${e.message}"
+                                isUploadingAvatar = false
+                                showAvatarDialog = false
+                                selectedImageUri = null
+
+                                // Скрываем ошибку через 3 секунды
+                                kotlinx.coroutines.delay(3000)
+                                errorMessage = null
+                            }
+                        }
+                    },
+                    enabled = !isUploadingAvatar,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    if (isUploadingAvatar) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Загрузка...")
+                    } else {
+                        Icon(Icons.Rounded.Check, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Установить")
+                    }
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showAvatarDialog = false
+                        selectedImageUri = null
+                    }
+                ) {
+                    Text("Отмена")
+                }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 
     Scaffold(
@@ -92,7 +261,6 @@ fun ProfileScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = {
-                        // При нажатии на стрелку просто возвращаемся назад без сохранения
                         navController.popBackStack()
                     }) {
                         Icon(
@@ -141,52 +309,102 @@ fun ProfileScreen(
                 }
 
                 item {
-                    // Аватар пользователя
+                    // Аватар пользователя с возможностью изменения
                     Box(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Card(
+                        Box(
                             modifier = Modifier
                                 .size(140.dp)
                                 .shadow(
                                     elevation = 8.dp,
                                     shape = CircleShape,
                                     clip = true
-                                ),
-                            shape = CircleShape,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                            ),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                                )
+                                .clip(CircleShape)
+                                .clickable { imagePickerLauncher.launch("image/*") }
                         ) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.profile_avatar),
+                            // Отображаем аватар
+                            if (avatarUrl != null && avatarUrl!!.isNotEmpty()) {
+                                AsyncImage(
+                                    model = avatarUrl,
                                     contentDescription = "Аватар пользователя",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
-
-                                // Бейдж онлайн статуса
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF10B981))
-                                        .border(
-                                            width = 2.dp,
-                                            color = MaterialTheme.colorScheme.surface,
-                                            shape = CircleShape
+                            } else {
+                                // Дефолтный аватар
+                                Card(
+                                    modifier = Modifier.fillMaxSize(),
+                                    shape = CircleShape,
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                                    )
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = displayName.take(2).uppercase(),
+                                            fontSize = 48.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
                                         )
-                                        .align(Alignment.BottomEnd)
+                                    }
+                                }
+                            }
+
+                            // Иконка камеры для изменения аватара
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .border(
+                                        width = 3.dp,
+                                        color = MaterialTheme.colorScheme.surface,
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Rounded.CameraAlt,
+                                    contentDescription = "Изменить аватар",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
+
+                        // Бейдж онлайн статуса
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF10B981))
+                                .border(
+                                    width = 2.dp,
+                                    color = MaterialTheme.colorScheme.surface,
+                                    shape = CircleShape
+                                )
+                                .align(Alignment.BottomEnd)
+                                .offset(x = (-8).dp, y = (-8).dp)
+                        )
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Подсказка для изменения аватара
+                    Text(
+                        text = "Нажмите на аватар, чтобы изменить",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
                 // Показать сообщение об ошибке если есть
@@ -217,7 +435,7 @@ fun ProfileScreen(
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
-                                        "Проверьте подключение",
+                                        "Ошибка",
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontWeight = FontWeight.SemiBold
                                         ),
@@ -269,7 +487,7 @@ fun ProfileScreen(
                                         color = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
                                     Text(
-                                        "Ваш прогресс сохранен!",
+                                        "Ваш профиль обновлен!",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
@@ -326,7 +544,7 @@ fun ProfileScreen(
                                 onValueChange = { displayName = it },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = TextFieldDefaults.outlinedTextFieldColors(
+                                colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = MaterialTheme.colorScheme.primary,
                                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                                     focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -517,7 +735,7 @@ fun ProfileScreen(
 
                                 coroutineScope.launch {
                                     try {
-                                        // 🔥 Обновляем существующий прогресс локально
+                                        // Обновляем существующий прогресс локально
                                         val currentProgress = existingProgress ?: UserProgress.createEmpty(currentUser.uid)
                                         val updatedProgress = currentProgress.copy(
                                             displayName = displayName.trim()
@@ -525,13 +743,30 @@ fun ProfileScreen(
 
                                         println("DEBUG: Сохраняем прогресс локально: имя='${updatedProgress.displayName}', уроков=${updatedProgress.completedLessons.size}, XP=${updatedProgress.totalXP}")
 
-                                        // ✅ Сохраняем локально (это работает даже без интернета)
+                                        // Сохраняем локально
                                         progressRepo.saveProgress(updatedProgress)
 
                                         // Обновляем существующий прогресс в памяти
                                         existingProgress = updatedProgress
 
-                                        // 🔄 Попытка обновить FirebaseAuth (если есть интернет, это сработает)
+                                        // Обновляем профиль пользователя в Firestore
+                                        try {
+                                            val db = Firebase.firestore
+                                            val userProfileData = hashMapOf(
+                                                "name" to displayName.trim(),
+                                                "nameLowercase" to displayName.trim().lowercase()
+                                            )
+                                            db.collection("users")
+                                                .document(currentUser.uid)
+                                                .set(userProfileData, com.google.firebase.firestore.SetOptions.merge())
+                                                .await()
+
+                                            println("DEBUG: Профиль обновлен в Firestore")
+                                        } catch (e: Exception) {
+                                            println("DEBUG: Не удалось обновить профиль в Firestore: ${e.message}")
+                                        }
+
+                                        // Попытка обновить FirebaseAuth
                                         try {
                                             val profileUpdates = com.google.firebase.auth.UserProfileChangeRequest.Builder()
                                                 .setDisplayName(displayName.trim())
@@ -539,35 +774,19 @@ fun ProfileScreen(
                                             currentUser.updateProfile(profileUpdates).await()
                                             println("DEBUG: Имя обновлено в FirebaseAuth")
                                         } catch (e: Exception) {
-                                            println("DEBUG: Не удалось обновить имя в FirebaseAuth (возможно нет интернета): ${e.message}")
-                                            // Игнорируем ошибку, главное - локальное сохранение
+                                            println("DEBUG: Не удалось обновить имя в FirebaseAuth: ${e.message}")
                                         }
 
                                         showSuccess = true
                                         isLoading = false
 
-                                        // Даём время показать сообщение об успехе
                                         kotlinx.coroutines.delay(1000)
                                         onNavigateToTabs()
 
                                     } catch (e: Exception) {
                                         println("DEBUG: Ошибка сохранения: ${e.message}")
-                                        // Даже при ошибке, пытаемся сохранить локально еще раз
-                                        try {
-                                            val currentProgress = existingProgress ?: UserProgress.createEmpty(currentUser.uid)
-                                            val updatedProgress = currentProgress.copy(
-                                                displayName = displayName.trim()
-                                            )
-                                            progressRepo.saveProgress(updatedProgress)
-                                            existingProgress = updatedProgress
-                                            showSuccess = true
-                                            isLoading = false
-                                            kotlinx.coroutines.delay(1000)
-                                            onNavigateToTabs()
-                                        } catch (e2: Exception) {
-                                            errorMessage = "Ошибка сохранения. Попробуйте позже."
-                                            isLoading = false
-                                        }
+                                        errorMessage = "Ошибка сохранения. Попробуйте позже."
+                                        isLoading = false
                                     }
                                 }
                             }
