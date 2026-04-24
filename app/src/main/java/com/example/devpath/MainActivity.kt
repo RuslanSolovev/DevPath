@@ -21,6 +21,9 @@ import com.example.devpath.data.repository.LocalThemeRepository
 import com.example.devpath.data.repository.ThemeRepository
 import com.example.devpath.ui.MainScreen
 import com.example.devpath.ui.theme.DevPathTheme
+import com.google.firebase.appcheck.FirebaseAppCheck
+import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
+import com.yandex.mapkit.MapKitFactory
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -32,7 +35,6 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var insetsController: WindowInsetsControllerCompat
 
-    // Регистрация для запроса нескольких разрешений
     private val requestMultiplePermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -51,18 +53,26 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 🔥 Инициализация Firebase App Check ДО super.onCreate()
+        try {
+            FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+                PlayIntegrityAppCheckProviderFactory.getInstance()
+            )
+            println("DEBUG: Firebase App Check initialized successfully")
+        } catch (e: Exception) {
+            println("DEBUG: Firebase App Check initialization failed: ${e.message}")
+            // Продолжаем работу даже если App Check не инициализировался
+        }
+
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
 
-        // Инициализируем insetsController
         insetsController = WindowInsetsControllerCompat(window, window.decorView)
 
-        // Перехватываем системную кнопку "Назад" на уровне Activity
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 println("DEBUG: onBackPressedDispatcher - перехвачено в MainActivity")
-                // НИЧЕГО НЕ ДЕЛАЕМ - позволим Compose обработать навигацию
             }
         })
 
@@ -72,7 +82,6 @@ class MainActivity : ComponentActivity() {
             println("DEBUG: MainActivity onCreate - первый запуск")
         }
 
-        // Запрос всех необходимых разрешений
         checkAndRequestAllPermissions()
 
         setContent {
@@ -84,33 +93,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Метод для переключения полноэкранного режима
-    fun setFullScreen(enabled: Boolean) {
-        val decorView = window.decorView
-
-        if (enabled) {
-            // Скрываем системные панели
-            decorView.systemUiVisibility = (
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                            View.SYSTEM_UI_FLAG_FULLSCREEN
-                    )
-            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-            insetsController.hide(WindowInsetsCompat.Type.systemBars())
-        } else {
-            // Показываем системные панели
-            decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
-            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-            insetsController.show(WindowInsetsCompat.Type.systemBars())
-        }
-    }
-
     override fun onStart() {
         super.onStart()
-        println("DEBUG: MainActivity onStart")
+        MapKitFactory.getInstance().onStart()
+        println("DEBUG: MainActivity onStart - MapKit started")
+    }
+
+    override fun onStop() {
+        MapKitFactory.getInstance().onStop()
+        super.onStop()
+        println("DEBUG: MainActivity onStop - MapKit stopped")
     }
 
     override fun onResume() {
@@ -121,11 +113,6 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         println("DEBUG: MainActivity onPause")
-    }
-
-    override fun onStop() {
-        super.onStop()
-        println("DEBUG: MainActivity onStop")
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -143,10 +130,30 @@ class MainActivity : ComponentActivity() {
         println("DEBUG: MainActivity onDestroy - Activity уничтожена")
     }
 
+    fun setFullScreen(enabled: Boolean) {
+        val decorView = window.decorView
+
+        if (enabled) {
+            decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_FULLSCREEN
+                    )
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     private fun checkAndRequestAllPermissions() {
         val permissionsToRequest = mutableListOf<String>()
 
-        // Разрешение для аудио (голосовые сообщения)
         if (ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.RECORD_AUDIO
@@ -155,7 +162,6 @@ class MainActivity : ComponentActivity() {
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
         }
 
-        // Разрешение для чтения фото (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,
@@ -166,7 +172,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Для старых версий Android
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             if (ContextCompat.checkSelfPermission(
                     this,
@@ -177,7 +182,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Разрешение для уведомлений (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,

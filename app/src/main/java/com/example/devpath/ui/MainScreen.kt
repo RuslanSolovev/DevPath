@@ -5,15 +5,18 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -29,19 +32,20 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.devpath.BuildConfig
 import com.example.devpath.data.repository.LocalThemeRepository
+import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.theme.AppTheme
+import com.example.devpath.ui.viewmodel.ChatsViewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
+import com.example.devpath.ui.viewmodel.StepCounterViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
-import com.example.devpath.ui.components.UserAvatar
-import com.example.devpath.ui.viewmodel.ChatsViewModel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 
 enum class MainTab2(val title: String) {
     HOME("Главная"),
@@ -56,6 +60,7 @@ fun MainScreen() {
     var isAuthenticated by remember { mutableStateOf(auth.currentUser != null) }
     val viewModel: ProgressViewModel = hiltViewModel()
     val chatViewModel: ChatsViewModel = hiltViewModel()
+    val stepCounterViewModel: StepCounterViewModel = hiltViewModel()
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { auth ->
@@ -76,8 +81,17 @@ fun MainScreen() {
 
         val isHiddenRoute = currentRoute == "profile" ||
                 currentRoute == "settings" ||
+                currentRoute == "step_counter" ||
+                currentRoute == "map" ||
+                currentRoute == "games_hub" ||
+                currentRoute == "journey_map" ||
                 currentRoute?.startsWith("chat_detail") == true ||
                 currentRoute?.startsWith("fullscreen_image") == true
+
+// Для отладки
+        LaunchedEffect(currentRoute) {
+            println("DEBUG: currentRoute = $currentRoute, isHiddenRoute = $isHiddenRoute, showBottomBar = ${showMainNavigation && !isHiddenRoute}")
+        }
 
         val showBottomBar = showMainNavigation && !isHiddenRoute
 
@@ -103,7 +117,18 @@ fun MainScreen() {
 
         Scaffold(
             bottomBar = {
-                if (showBottomBar) {
+                val shouldShowBottomBar = showBottomBar &&
+                        currentRoute != null &&
+                        currentRoute != "profile" &&
+                        currentRoute != "settings" &&
+                        currentRoute != "step_counter" &&
+                        currentRoute != "map" &&
+                        currentRoute != "games_hub" &&
+                        !currentRoute.startsWith("journey_map") &&
+                        !currentRoute.startsWith("chat_detail") &&
+                        !currentRoute.startsWith("fullscreen_image")
+
+                if (shouldShowBottomBar) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -180,7 +205,10 @@ fun MainScreen() {
                     composable(MainTab2.HOME.name) {
                         HomeTabScreen(
                             onNavigateToProfile = { navController.navigate("profile") },
-                            onNavigateToSettings = { navController.navigate("settings") }
+                            onNavigateToSettings = { navController.navigate("settings") },
+                            onNavigateToStepCounter = { navController.navigate("step_counter") },
+                            onNavigateToMap = { navController.navigate("map") },
+                            onNavigateToGamesHub = { navController.navigate("games_hub") }
                         )
                     }
 
@@ -218,6 +246,29 @@ fun MainScreen() {
 
                     composable("search_friends") {
                         SearchFriendsScreen(navController = navController)
+                    }
+
+                    composable("step_counter") {
+                        StepCounterScreen(navController = navController)
+                    }
+
+                    composable("map") {
+                        MapScreen(navController = navController)
+                    }
+
+                    composable("games_hub") {
+                        GamesHubScreen(navController = navController)
+                    }
+
+                    composable(
+                        route = "journey_map/{steps}",
+                        arguments = listOf(navArgument("steps") { type = NavType.IntType })
+                    ) { backStackEntry ->
+                        val steps = backStackEntry.arguments?.getInt("steps") ?: 0
+                        JourneyMapScreen(
+                            navController = navController,
+                            totalSteps = steps
+                        )
                     }
 
                     composable(
@@ -264,7 +315,6 @@ fun MainScreen() {
                                 navController = navController
                             )
                         }
-
                     }
                 }
             }
@@ -275,7 +325,10 @@ fun MainScreen() {
 @Composable
 fun HomeTabScreen(
     onNavigateToProfile: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onNavigateToStepCounter: () -> Unit,
+    onNavigateToMap: () -> Unit,
+    onNavigateToGamesHub: () -> Unit
 ) {
     val currentUser = Firebase.auth.currentUser
     val viewModel: ProgressViewModel = hiltViewModel()
@@ -363,7 +416,7 @@ fun HomeTabScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.Top
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Карточка пользователя
         Card(
@@ -383,7 +436,6 @@ fun HomeTabScreen(
                         .clickable { onNavigateToProfile() },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Аватар пользователя
                     UserAvatar(
                         avatarUrl = userProfile?.avatarUrl,
                         name = displayName,
@@ -421,9 +473,42 @@ fun HomeTabScreen(
             }
         }
 
+        // Карточки быстрого доступа (Шагомер, Карта, Игры)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            item {
+                QuickAccessCard(
+                    title = "Шагомер",
+                    subtitle = "Считай шаги",
+                    icon = Icons.Outlined.DirectionsWalk,
+                    gradient = listOf(Color(0xFF4CAF50), Color(0xFF2E7D32)),
+                    onClick = onNavigateToStepCounter
+                )
+            }
+            item {
+                QuickAccessCard(
+                    title = "Карта",
+                    subtitle = "Друзья рядом",
+                    icon = Icons.Outlined.Map,
+                    gradient = listOf(Color(0xFF2196F3), Color(0xFF0D47A1)),
+                    onClick = onNavigateToMap
+                )
+            }
+            item {
+                QuickAccessCard(
+                    title = "Игры",
+                    subtitle = "Мини-игры",
+                    icon = Icons.Outlined.SportsEsports,
+                    gradient = listOf(Color(0xFFFF9800), Color(0xFFE65100)),
+                    onClick = onNavigateToGamesHub
+                )
+            }
+        }
+
         // Кнопка создания объявления (только для владельца)
         if (currentUser?.uid == OWNER_ID) {
-            Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = { showCreateDialog = true },
                 modifier = Modifier.fillMaxWidth(),
@@ -460,8 +545,6 @@ fun HomeTabScreen(
 
         // Баннер с объявлениями (карусель)
         if (!isLoadingAnnouncements && announcements.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -559,6 +642,61 @@ fun HomeTabScreen(
     }
 }
 
+@Composable
+fun QuickAccessCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    gradient: List<Color>,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .width(120.dp)
+            .height(130.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = gradient
+                    )
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(36.dp),
+                    tint = Color.White
+                )
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.8f)
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateAnnouncementDialogModern(
@@ -598,7 +736,6 @@ fun CreateAnnouncementDialogModern(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primaryContainer
                     ) {
-
                         Icon(
                             Icons.Default.Notifications,
                             contentDescription = null,
@@ -1113,7 +1250,6 @@ private fun ModernAnnouncementCard(
                 }
             }
 
-            // Кнопка действия - исправлено: используем Card вместо Surface с onClick
             announcement.actionText?.takeIf { it.isNotBlank() }?.let { actionText ->
                 Spacer(modifier = Modifier.height(12.dp))
 

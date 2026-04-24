@@ -20,6 +20,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.google.firebase.Timestamp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -832,6 +835,123 @@ class ChatRepository @Inject constructor(
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+
+    // ============================================================================
+// 🔹 ФИНАЛЬНЫЙ МЕТОД: ищет ЛЮБОЙ существующий чат + создаёт без дублей
+// ============================================================================
+
+    suspend fun findOrCreatePersonalChat(userId1: String, userId2: String): String = withContext(
+        Dispatchers.IO) {
+        val sortedIds = listOf(userId1, userId2).sorted()
+        val deterministicId = sortedIds.joinToString("_")
+
+        // 🔹 Вспомогательная функция для повторных попыток
+        suspend fun retryWithBackoff(
+            maxRetries: Int = 3,
+            initialDelay: Long = 1000,
+            operation: suspend () -> String
+        ): String {
+            var currentDelay = initialDelay
+            repeat(maxRetries - 1) { attempt ->
+                try {
+                    return operation()
+                } catch (e: Exception) {
+                    println("DEBUG: Attempt ${attempt + 1} failed: ${e.message}")
+                    if (attempt == maxRetries - 2) throw e
+                    delay(currentDelay)
+                    currentDelay *= 2
+                }
+            }
+            return operation()
+        }
+
+        return@withContext try {
+            // 🔹 1. Пытаемся найти существующий чат
+            retryWithBackoff(maxRetries = 3) {
+                try {
+                    // Быстрая проверка детерминированного ID
+                    val directRef = db.collection("chats").document(deterministicId)
+                    val directSnap = try {
+                        directRef.get().await()
+                    } catch (e: Exception) {
+                        if (e.message?.contains("offline") == true) {
+                            println("DEBUG: Offline detected, waiting for connection...")
+                            delay(2000)
+                            directRef.get().await()
+                        } else {
+                            throw e
+                        }
+                    }
+
+                    if (directSnap.exists()) {
+                        println("DEBUG: Found by deterministic ID: $deterministicId")
+                        return@retryWithBackoff deterministicId
+                    }
+
+                    // 🔹 2. Поиск по коллекции
+                    val querySnapshot = try {
+                        db.collection("chats")
+                            .whereEqualTo("type", "personal")
+                            .whereArrayContains("participants", userId1)
+                            .get()
+                            .await()
+                    } catch (e: Exception) {
+                        if (e.message?.contains("offline") == true) {
+                            println("DEBUG: Offline during query, using fallback...")
+                            // В офлайн-режиме пропускаем поиск
+                            throw e
+                        }
+                        throw e
+                    }
+
+                    val existingChat = querySnapshot.documents.firstOrNull { doc ->
+                        val participants = doc.get("participants") as? List<String> ?: emptyList()
+                        participants.contains(userId2) && participants.size == 2
+                    }
+
+                    if (existingChat != null) {
+                        println("DEBUG: Found by query search: ${existingChat.id}")
+                        return@retryWithBackoff existingChat.id
+                    }
+
+                    // 🔹 3. Создаём новый чат
+                    val chatData = mapOf(
+                        "type" to "personal",
+                        "participants" to sortedIds,
+                        "name" to "",
+                        "lastMessage" to "",
+                        "lastMessageSender" to "",
+                        "lastMessageTime" to com.google.firebase.Timestamp.now(),
+                        "createdAt" to com.google.firebase.Timestamp.now(),
+                        "unreadCounts" to mapOf(userId1 to 0, userId2 to 0)
+                    )
+
+                    try {
+                        directRef.set(chatData).await()
+                        println("DEBUG: Created new chat with deterministic ID: $deterministicId")
+                    } catch (e: Exception) {
+                        // Если не удалось создать (офлайн), используем ID локально
+                        println("DEBUG: Failed to create chat, using offline ID: $deterministicId")
+                    }
+
+                    return@retryWithBackoff deterministicId
+                } catch (e: Exception) {
+                    println("DEBUG: Chat operation failed: ${e.message}")
+                    // Возвращаем детерминированный ID даже при ошибке
+                    if (e.message?.contains("offline") == true) {
+                        println("DEBUG: Using deterministic ID in offline mode: $deterministicId")
+                        return@retryWithBackoff deterministicId
+                    }
+                    throw e
+                }
+            }
+        } catch (e: Exception) {
+            println("DEBUG: All retries failed, using deterministic ID: $deterministicId")
+            // 🔹 Финальный fallback - всегда возвращаем ID
+            deterministicId
         }
     }
 

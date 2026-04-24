@@ -34,7 +34,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.devpath"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -94,6 +94,17 @@ dependencies {
     implementation("com.amazonaws:aws-android-sdk-s3:2.73.0")
     implementation("com.amazonaws:aws-android-sdk-core:2.73.0")
 
+    // Яндекс Карты
+    implementation("com.yandex.android:maps.mobile:4.5.1-full")
+
+    // Play Services Location
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // Accompanist Permissions
+    implementation("com.google.accompanist:accompanist-permissions:0.35.0-alpha")
+
+    implementation("com.google.firebase:firebase-appcheck-playintegrity:17.0.1")
+
     // Coil для загрузки изображений
     implementation(libs.coil.compose)
 
@@ -140,6 +151,7 @@ dependencies {
 
     // Dependency Injection - Hilt
     implementation(libs.hilt.android)
+    implementation(libs.androidx.compose.foundation)
     kapt(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 

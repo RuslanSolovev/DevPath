@@ -8,12 +8,28 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
-    <!-- Разрешения для аудио -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Разрешения для геолокации -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Разрешение для шагомера (Android 10+) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
+    <!-- Для старых версий Android -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
 
     <!-- Базовые разрешения -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!-- Для Android 14+ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SENSORS" />
+
+    <!-- Разрешения для аудио -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- Для Android 13+ уведомления -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -46,9 +62,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Сервис шагомера -->
+        <service
+            android:name=".services.StepCounterService"
+            android:enabled="true"
+            android:exported="false"
+            tools:targetApi="29" />
 
-
-        <!-- ✅ FileProvider для шаринга изображений и сохранения -->
+        <!-- FileProvider для шаринга изображений и сохранения -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

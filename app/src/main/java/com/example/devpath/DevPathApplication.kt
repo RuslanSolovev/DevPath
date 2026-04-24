@@ -2,6 +2,7 @@ package com.example.devpath
 
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.yandex.mapkit.MapKitFactory
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -11,10 +12,16 @@ class DevPathApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // 🔑 ИНИЦИАЛИЗАЦИЯ YANDEX MAPKIT
+        // ВАЖНО: setApiKey() должен быть вызван ДО initialize()
+        // Используйте ваш реальный API-ключ из кабинета разработчика
+        MapKitFactory.setApiKey("6b7f7e6b-d322-42b2-8471-d8aecc6570d1")
+        MapKitFactory.initialize(applicationContext)
+
         // Отслеживаем жизненный цикл приложения
         ProcessLifecycleOwner.get().lifecycle.addObserver(AppLifecycleObserver())
 
-        println("DEBUG: DevPathApplication создан")
+        println("DEBUG: DevPathApplication создан, MapKit инициализирован")
     }
 
     class AppLifecycleObserver : androidx.lifecycle.LifecycleObserver {
