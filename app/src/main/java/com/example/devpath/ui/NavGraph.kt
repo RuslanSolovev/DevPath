@@ -7,6 +7,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
@@ -28,6 +29,7 @@ import kotlin.random.Random
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.example.devpath.domain.models.GeneralTestResult
 import androidx.navigation.compose.navigation
+import com.example.devpath.data.repository.YdbRepository
 import com.google.firebase.auth.FirebaseAuth
 
 @Composable
@@ -121,8 +123,10 @@ fun DevPathNavGraph(
         startDestination = startDestination
     ) {
         composable("auth") {
+            val ydbRepository = remember { YdbRepository() }
             AuthScreen(
-                onSuccess = {
+                ydbRepository = ydbRepository,
+                onSuccess = { userId ->
                     navController.navigate("dashboard") {
                         popUpTo("auth") { inclusive = true }
                     }
@@ -150,7 +154,15 @@ fun DevPathNavGraph(
         }
 
         composable("profile") {
+            val context = LocalContext.current
+            val ydbRepository = remember { YdbRepository() }
+            val currentUserId = remember {
+                val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+                prefs.getString("user_id", "") ?: ""
+            }
             ProfileScreen(
+                ydbRepository = ydbRepository,
+                currentUserId = currentUserId,
                 navController = navController,
                 onNavigateToTabs = {
                     navController.popBackStack("dashboard", false)

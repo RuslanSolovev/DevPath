@@ -14,17 +14,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.devpath.data.repository.LocalThemeRepository
 import com.example.devpath.data.repository.ThemeRepository
+import com.example.devpath.data.repository.YdbRepository
 import com.example.devpath.ui.MainScreen
 import com.example.devpath.ui.theme.DevPathTheme
-import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 import com.yandex.mapkit.MapKitFactory
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -32,6 +32,8 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var themeRepository: ThemeRepository
+    @Inject
+    lateinit var ydbRepository: YdbRepository
 
     private lateinit var insetsController: WindowInsetsControllerCompat
 
@@ -53,17 +55,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 🔥 Инициализация Firebase App Check ДО super.onCreate()
-        try {
-            FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                PlayIntegrityAppCheckProviderFactory.getInstance()
-            )
-            println("DEBUG: Firebase App Check initialized successfully")
-        } catch (e: Exception) {
-            println("DEBUG: Firebase App Check initialization failed: ${e.message}")
-            // Продолжаем работу даже если App Check не инициализировался
-        }
-
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
@@ -80,6 +71,20 @@ class MainActivity : ComponentActivity() {
             println("DEBUG: MainActivity onCreate - восстановление после поворота/сворачивания")
         } else {
             println("DEBUG: MainActivity onCreate - первый запуск")
+        }
+
+        // ✅ ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ YDB
+        lifecycleScope.launch {
+            try {
+                val success = ydbRepository.initDatabase()
+                if (success) {
+                    println("DEBUG: YDB база данных готова к работе")
+                } else {
+                    println("DEBUG: ⚠️ Не удалось инициализировать базу данных YDB")
+                }
+            } catch (e: Exception) {
+                println("DEBUG: ❌ Ошибка инициализации YDB: ${e.message}")
+            }
         }
 
         checkAndRequestAllPermissions()

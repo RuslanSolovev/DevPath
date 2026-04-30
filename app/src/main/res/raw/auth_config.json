@@ -1,0 +1,6 @@
+{
+  "client_id": "ajeja60f9dcmbkvc6n28",
+  "redirect_uri": "devpath://auth",
+  "authorization_scope": "openid email profile",
+  "discovery_uri": "https://auth.yandex.cloud/.well-known/openid-configuration"
+}

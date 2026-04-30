@@ -2,7 +2,6 @@ package com.example.devpath.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,17 +25,18 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.example.devpath.BuildConfig
+import com.example.devpath.data.repository.YdbRepository
 import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.viewmodel.ChatsViewModel
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.delay
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatsScreen(
-    userId: String,
+    ydbRepository: YdbRepository,
+    currentUserId: String,
     navController: NavHostController
 ) {
     val viewModel: ChatsViewModel = hiltViewModel()
@@ -47,7 +47,7 @@ fun ChatsScreen(
     var chatToDelete by remember { mutableStateOf<com.example.devpath.domain.models.Chat?>(null) }
 
     LaunchedEffect(Unit) {
-        viewModel.loadChats(userId)
+        viewModel.loadChats(currentUserId)
     }
 
     Scaffold(
@@ -201,10 +201,12 @@ fun ChatsScreen(
                     ) {
                         items(chats, key = { it.chatId }) { chat ->
                             ChatItemModern(
+                                ydbRepository = ydbRepository,
                                 chat = chat,
+                                currentUserId = currentUserId,
                                 onClick = {
                                     if (chat.chatId.isNotBlank()) {
-                                        val friendId = chat.participants.firstOrNull { it != userId }
+                                        val friendId = chat.participants.firstOrNull { it != currentUserId }
                                         navController.navigate("chat_detail/${chat.chatId}/${friendId ?: ""}")
                                     }
                                 },
@@ -273,7 +275,9 @@ fun ChatsScreen(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatItemModern(
+    ydbRepository: YdbRepository,
     chat: com.example.devpath.domain.models.Chat,
+    currentUserId: String,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -281,41 +285,20 @@ fun ChatItemModern(
     var friendName by remember { mutableStateOf("") }
     var isFriendOnline by remember { mutableStateOf(false) }
 
-    val currentUserId = Firebase.auth.currentUser?.uid ?: ""
     val context = LocalContext.current
-
-    // Создаем репозиторий напрямую
-    val chatRepository = remember {
-        com.example.devpath.data.repository.ChatRepository(
-            yandexStorageClient = com.example.devpath.data.storage.YandexStorageClient(
-                context = context,
-                accessKey = BuildConfig.YC_ACCESS_KEY,
-                secretKey = BuildConfig.YC_SECRET_KEY,
-                bucketName = BuildConfig.YC_BUCKET_NAME
-            )
-        )
-    }
 
     // Загружаем данные о друге для личных чатов
     LaunchedEffect(chat.chatId, chat.type) {
         if (chat.type == "personal") {
             val friendId = chat.participants.firstOrNull { it != currentUserId }
             if (friendId != null) {
-                val friend = chatRepository.getUser(friendId)
-                friendAvatarUrl = friend?.avatarUrl
-                friendName = friend?.name ?: chat.name
-            }
-        }
-    }
+                val friend = ydbRepository.getUser(friendId)
+                friendAvatarUrl = friend?.optString("avatar_url", "")?.ifEmpty { null }
+                friendName = friend?.optString("name", "") ?: chat.name
 
-    // Отдельный LaunchedEffect для онлайн статуса
-    LaunchedEffect(chat.chatId, chat.type) {
-        if (chat.type == "personal") {
-            val friendId = chat.participants.firstOrNull { it != currentUserId }
-            if (friendId != null) {
-                chatRepository.observeUserOnlineStatus(friendId).collect { online ->
-                    isFriendOnline = online
-                }
+                // Проверяем онлайн статус (активность за последние 2 минуты)
+                val lastSeen = friend?.optLong("last_seen", 0) ?: 0
+                isFriendOnline = System.currentTimeMillis() - lastSeen < 120_000
             }
         }
     }

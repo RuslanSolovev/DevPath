@@ -13,7 +13,16 @@
           "package_name": "com.example.devpath"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "340043969778-revfj21rqaa5lklg9v7tp5nlvfica0r6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.devpath",
+            "certificate_hash": "b78f2d7d8c3611526462c52937d28865639177c7"
+          }
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDg_RzmZj-m26LoFIoC5RYKqRpf0KvefQg"
@@ -28,3 +37,4 @@
   ],
   "configuration_version": "1"
 }
+

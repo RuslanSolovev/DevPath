@@ -11,22 +11,24 @@ plugins {
     id("kotlin-parcelize")
 }
 
-// Загружаем local.properties
+// Загрузка local.properties
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
     localProperties.load(FileInputStream(localPropertiesFile))
     println("✅ local.properties loaded")
 } else {
-    println("❌ local.properties not found at ${localPropertiesFile.absolutePath}")
+    println("⚠️ local.properties not found - создайте файл с ключами")
 }
 
 val ycAccessKey: String = localProperties.getProperty("yc_access_key", "")
 val ycSecretKey: String = localProperties.getProperty("yc_secret_key", "")
 val ycBucketName: String = localProperties.getProperty("yc_bucket_name", "")
+val ycYdbEndpoint: String = localProperties.getProperty("yc_ydb_endpoint", "grpcs://ydb.serverless.yandexcloud.net:2135")
+val ycYdbDatabase: String = localProperties.getProperty("yc_ydb_database", "")
 
-println("YC_ACCESS_KEY: ${if (ycAccessKey.isNotEmpty()) "***" else "NOT SET"}")
-println("YC_BUCKET_NAME: ${if (ycBucketName.isNotEmpty()) ycBucketName else "NOT SET"}")
+println("YC_ACCESS_KEY: ${if (ycAccessKey.isNotEmpty()) "***SET***" else "NOT SET"}")
+println("YC_SECRET_KEY: ${if (ycSecretKey.isNotEmpty()) "***SET***" else "NOT SET"}")
 
 android {
     namespace = "com.example.devpath"
@@ -44,10 +46,12 @@ android {
             useSupportLibrary = true
         }
 
-        // ✅ Добавляем поля в BuildConfig
+        // ✅ Поля для BuildConfig
         buildConfigField("String", "YC_ACCESS_KEY", "\"$ycAccessKey\"")
         buildConfigField("String", "YC_SECRET_KEY", "\"$ycSecretKey\"")
         buildConfigField("String", "YC_BUCKET_NAME", "\"$ycBucketName\"")
+        buildConfigField("String", "YC_YDB_ENDPOINT", "\"$ycYdbEndpoint\"")
+        buildConfigField("String", "YC_YDB_DATABASE", "\"$ycYdbDatabase\"")
     }
 
     buildTypes {
@@ -71,7 +75,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true  // ✅ ВАЖНО: включает генерацию BuildConfig
+        buildConfig = true  // ✅ Обязательно для BuildConfig
     }
 
     composeOptions {
@@ -87,34 +91,25 @@ android {
 
 dependencies {
 
-    // Accompanist System UI Controller (для скрытия статус-бара)
-    implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
-
-    // AWS SDK для Yandex Cloud Object Storage
-    implementation("com.amazonaws:aws-android-sdk-s3:2.73.0")
-    implementation("com.amazonaws:aws-android-sdk-core:2.73.0")
 
     // Яндекс Карты
     implementation("com.yandex.android:maps.mobile:4.5.1-full")
 
-    // Play Services Location
+    // Location & Permissions
     implementation("com.google.android.gms:play-services-location:21.3.0")
-
-    // Accompanist Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.35.0-alpha")
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
 
-    implementation("com.google.firebase:firebase-appcheck-playintegrity:17.0.1")
-
-    // Coil для загрузки изображений
+    // Изображения
     implementation(libs.coil.compose)
 
-    // Firebase
+    // Firebase (можно убрать позже)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.storage)
 
-    // Core Android
+    // Core Android + Compose
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -123,57 +118,50 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.compose.foundation)
 
-    // Для работы с API
+    // Сеть
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging.interceptor)
+    implementation(libs.gson)
 
-    // Kotlin Serialization
+    // Kotlin
     implementation(libs.kotlinx.serialization.json)
-
-    // Coroutines
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
 
-    // Jetpack Compose Navigation
+    // Navigation
     implementation(libs.androidx.navigation.compose)
 
-    implementation(libs.gson)
-
-    // Lifecycle ViewModel для Compose
+    // Lifecycle + ViewModel
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.0")
 
-    // Google Sign-In
+    // Auth
     implementation(libs.play.services.auth)
 
-    // Material Icons Extended
+    // Icons
     implementation("androidx.compose.material:material-icons-extended:1.6.0")
 
-    // Dependency Injection - Hilt
+    // Hilt DI
     implementation(libs.hilt.android)
-    implementation(libs.androidx.compose.foundation)
     kapt(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
-    // Room Database
+    // Room
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     kapt(libs.androidx.room.compiler)
 
-    // Lifecycle
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
-    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.0")
-    implementation("androidx.lifecycle:lifecycle-process:2.8.0")
-    implementation("androidx.lifecycle:lifecycle-common:2.8.0")
+    // DataStore
+    implementation(libs.androidx.datastore.preferences)
 
     // Media
     implementation("androidx.media:media:1.7.0")
 
-    // DataStore для хранения настроек
-    implementation(libs.androidx.datastore.preferences)
-
-    // Тестирование
+    // Тесты
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -183,7 +171,6 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 }
 
-// Настройка kapt
 kapt {
     correctErrorTypes = true
     useBuildCache = true
