@@ -40,6 +40,7 @@ import androidx.navigation.navArgument
 import org.json.JSONArray
 import org.json.JSONObject
 import com.example.devpath.utils.Config
+import com.yandex.mapkit.mapview.MapView
 import java.util.UUID
 
 enum class MainTab2(val title: String) {
@@ -50,9 +51,7 @@ enum class MainTab2(val title: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen() {
-    // ✅ Получаем репозиторий через Hilt (если используешь Hilt)
-    // Если нет — оставляем remember, но тогда убери @Inject из YdbRepository
+fun MainScreen(mapView: MapView? = null) {
     val ydbRepository = remember { YdbRepository() }
 
     var isAuthenticated by remember { mutableStateOf(false) }
@@ -64,7 +63,6 @@ fun MainScreen() {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // Проверка авторизации при запуске
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
         val userId = prefs.getString("user_id", null)
@@ -138,10 +136,8 @@ fun MainScreen() {
                                 Surface(
                                     modifier = Modifier.size(if (isSelected) 56.dp else 48.dp),
                                     shape = CircleShape,
-                                    color = if (isSelected)
-                                        MaterialTheme.colorScheme.primary
-                                    else
-                                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.8f),
                                     tonalElevation = if (isSelected) 0.dp else 2.dp,
                                     onClick = {
                                         navController.navigate(tab.name) {
@@ -162,10 +158,8 @@ fun MainScreen() {
                                             },
                                             contentDescription = tab.title,
                                             modifier = Modifier.size(if (isSelected) 28.dp else 24.dp),
-                                            tint = if (isSelected)
-                                                MaterialTheme.colorScheme.onPrimary
-                                            else
-                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         if (isSelected) {
                                             Box(
@@ -219,7 +213,7 @@ fun MainScreen() {
 
                     composable(MainTab2.TEXTBOOK.name) {
                         DevPathNavGraph(
-                            navController = rememberNavController(),
+                            navController = navController,
                             onNavigationVisibilityChanged = { isVisible ->
                                 showMainNavigation = isVisible
                             }
@@ -252,10 +246,31 @@ fun MainScreen() {
                         )
                     }
 
-                    composable("friends") { FriendsScreen(navController = navController) }
-                    composable("search_friends") { SearchFriendsScreen(navController = navController) }
+                    composable("friends") {
+                        FriendsScreen(
+                            ydbRepository = ydbRepository,
+                            currentUserId = currentUserId,
+                            navController = navController
+                        )
+                    }
+
+                    composable("search_friends") {
+                        SearchFriendsScreen(
+                            ydbRepository = ydbRepository,
+                            currentUserId = currentUserId,
+                            navController = navController
+                        )
+                    }
+
                     composable("step_counter") { StepCounterScreen(navController = navController) }
-                    composable("map") { MapScreen(navController = navController) }
+
+                    // ✅ Передаём mapView в MapScreen
+                    composable("map") {
+                        if (mapView != null) {
+                            MapScreen(navController = navController, mapView = mapView)
+                        }
+                    }
+
                     composable("games_hub") { GamesHubScreen(navController = navController) }
 
                     composable(
@@ -270,12 +285,18 @@ fun MainScreen() {
                         route = "chat_detail/{chatId}/{friendId}",
                         arguments = listOf(
                             navArgument("chatId") { type = NavType.StringType },
-                            navArgument("friendId") { type = NavType.StringType }
+                            navArgument("friendId") { type = NavType.StringType; defaultValue = "" }
                         )
                     ) { backStackEntry ->
                         val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
                         val friendId = backStackEntry.arguments?.getString("friendId") ?: ""
-                        ChatDetailScreen(chatId = chatId, friendId = friendId, navController = navController)
+                        ChatDetailScreen(
+                            chatId = chatId,
+                            friendId = friendId,
+                            currentUserId = currentUserId,
+                            ydbRepository = ydbRepository,
+                            navController = navController
+                        )
                     }
 
                     composable(
@@ -283,7 +304,10 @@ fun MainScreen() {
                         arguments = listOf(navArgument("chatId") { type = NavType.StringType })
                     ) { backStackEntry ->
                         val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
-                        SearchMessagesScreen(chatId = chatId, navController = navController)
+                        SearchMessagesScreen(
+                            chatId = chatId,
+                            navController = navController
+                        )
                     }
 
                     composable(

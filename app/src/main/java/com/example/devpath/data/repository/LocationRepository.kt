@@ -5,16 +5,12 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ktx.firestore
-import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.tasks.await
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,10 +31,12 @@ data class LocationSettings(
 
 @Singleton
 class LocationRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val ydbRepository: YdbRepository
 ) {
-    private val db: FirebaseFirestore = Firebase.firestore
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+    private val locationsTable = "user_locations_doc"
+    private val settingsTable = "location_settings_doc"
 
     private val _currentLocation = MutableStateFlow<android.location.Location?>(null)
     val currentLocation: StateFlow<android.location.Location?> = _currentLocation
@@ -46,11 +44,13 @@ class LocationRepository @Inject constructor(
     private val _locationSettings = MutableStateFlow<LocationSettings>(LocationSettings())
     val locationSettings: StateFlow<LocationSettings> = _locationSettings
 
+    suspend fun initLocationTables() {
+        ydbRepository.initTable(locationsTable, "user_id")
+        ydbRepository.initTable(settingsTable, "user_id")
+    }
+
     fun hasLocationPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
 
     suspend fun startLocationUpdates() {
@@ -65,80 +65,80 @@ class LocationRepository @Inject constructor(
 
     suspend fun updateUserLocation(userId: String, name: String, avatarUrl: String?) {
         val location = _currentLocation.value ?: return
-        val settings = _locationSettings.value
+        val now = System.currentTimeMillis()
 
-        val data = mapOf(
-            "latitude" to location.latitude,
-            "longitude" to location.longitude,
-            "lastUpdated" to System.currentTimeMillis(),
-            "name" to name,
-            "avatarUrl" to avatarUrl,
-            "isOnline" to true,
-            "visibility" to settings.visibility,
-            "selectedFriends" to settings.selectedFriends
-        )
-        db.collection("user_locations").document(userId).set(data).await()
+        val item = JSONObject().apply {
+            put("user_id", JSONObject().put("S", userId))
+            put("name", JSONObject().put("S", name))
+            put("avatar_url", JSONObject().put("S", avatarUrl ?: ""))
+            put("latitude", JSONObject().put("N", location.latitude.toString()))
+            put("longitude", JSONObject().put("N", location.longitude.toString()))
+            put("last_updated", JSONObject().put("S", now.toString()))
+            put("is_online", JSONObject().put("BOOL", true))
+        }
+
+        val body = JSONObject().apply {
+            put("TableName", locationsTable)
+            put("Item", item)
+        }
+        ydbRepository.executeSignedRequest("PutItem", body)
     }
 
-    fun getNearbyUsers(userId: String, visibility: String, friendsList: List<String>): Flow<List<UserLocation>> = callbackFlow {
-        val subscription = db.collection("user_locations")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    close(error)
-                    return@addSnapshotListener
-                }
 
-                val users = snapshot?.documents?.mapNotNull { doc ->
-                    val uid = doc.id
-                    if (uid == userId) return@mapNotNull null
+    suspend fun getNearbyUsers(): List<UserLocation> {
+        val body = JSONObject().apply {
+            put("TableName", locationsTable)
+            put("Limit", 200)
+        }
+        val result = ydbRepository.executeSignedRequest("Scan", body)
+        val items = result?.optJSONArray("Items") ?: JSONArray()
 
-                    val otherVisibility = doc.getString("visibility") ?: "all"
-                    val otherSelectedFriends = doc.get("selectedFriends") as? List<String> ?: emptyList()
-
-                    when (otherVisibility) {
-                        "nobody" -> return@mapNotNull null
-                        "friends" -> {
-                            if (!otherSelectedFriends.contains(userId)) {
-                                return@mapNotNull null
-                            }
-                        }
-                        "all" -> { }
-                    }
-
-                    UserLocation(
-                        userId = uid,
-                        name = doc.getString("name") ?: "",
-                        avatarUrl = doc.getString("avatarUrl"),
-                        latitude = doc.getDouble("latitude") ?: 0.0,
-                        longitude = doc.getDouble("longitude") ?: 0.0,
-                        isOnline = System.currentTimeMillis() - (doc.getLong("lastUpdated") ?: 0) < 120_000,
-                        lastUpdated = doc.getLong("lastUpdated") ?: 0
-                    )
-                } ?: emptyList()
-
-                println("DEBUG: getNearbyUsers - найдено ${users.size} пользователей")
-                trySend(users)
-            }
-        awaitClose { subscription.remove() }
+        return (0 until items.length()).mapNotNull { i ->
+            val json = items.getJSONObject(i)
+            val lastUpdated = json.optJSONObject("last_updated")?.optString("S")?.toLongOrNull() ?: 0
+            UserLocation(
+                userId = json.optJSONObject("user_id")?.optString("S") ?: return@mapNotNull null,
+                name = json.optJSONObject("name")?.optString("S") ?: "",
+                avatarUrl = json.optJSONObject("avatar_url")?.optString("S")?.ifEmpty { null },
+                latitude = json.optJSONObject("latitude")?.optString("N")?.toDoubleOrNull() ?: 0.0,
+                longitude = json.optJSONObject("longitude")?.optString("N")?.toDoubleOrNull() ?: 0.0,
+                isOnline = System.currentTimeMillis() - lastUpdated < 120_000,
+                lastUpdated = lastUpdated
+            )
+        }
     }
 
     suspend fun saveLocationSettings(userId: String, settings: LocationSettings) {
         _locationSettings.value = settings
-        db.collection("location_settings").document(userId).set(settings).await()
-        db.collection("user_locations").document(userId).update(
-            mapOf(
-                "visibility" to settings.visibility,
-                "selectedFriends" to settings.selectedFriends
-            )
-        ).await()
+
+        val selectedFriendsArray = JSONArray()
+        settings.selectedFriends.forEach { selectedFriendsArray.put(it) }
+
+        val item = JSONObject().apply {
+            put("user_id", JSONObject().put("S", userId))
+            put("visibility", JSONObject().put("S", settings.visibility))
+            put("selected_friends", JSONObject().put("SS", selectedFriendsArray))
+        }
+
+        val body = JSONObject().apply {
+            put("TableName", settingsTable)
+            put("Item", item)
+        }
+        ydbRepository.executeSignedRequest("PutItem", body)
     }
 
     suspend fun loadLocationSettings(userId: String): LocationSettings {
-        return try {
-            val doc = db.collection("location_settings").document(userId).get().await()
-            doc.toObject(LocationSettings::class.java) ?: LocationSettings()
-        } catch (e: Exception) {
-            LocationSettings()
-        }.also { _locationSettings.value = it }
+        val key = JSONObject().apply { put("user_id", JSONObject().put("S", userId)) }
+        val body = JSONObject().apply { put("TableName", settingsTable); put("Key", key) }
+        val result = ydbRepository.executeSignedRequest("GetItem", body)
+        val item = result?.optJSONObject("Item") ?: return LocationSettings().also { _locationSettings.value = it }
+
+        val friendsArray = item.optJSONObject("selected_friends")?.optJSONArray("SS") ?: JSONArray()
+        val friends = (0 until friendsArray.length()).map { friendsArray.getString(it) }
+
+        return LocationSettings(
+            visibility = item.optJSONObject("visibility")?.optString("S") ?: "all",
+            selectedFriends = friends
+        ).also { _locationSettings.value = it }
     }
 }

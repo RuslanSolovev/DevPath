@@ -3,14 +3,10 @@ package com.example.devpath.domain.models
 import com.google.firebase.Timestamp
 
 data class Chat(
-    val chatId: String = "",  // ← это поле должно быть
+    val chatId: String = "",
     val type: String = "personal",
     val participants: List<String> = emptyList(),
-    val name: String = "",
-    val createdAt: Timestamp = Timestamp.now(),
-    val lastMessage: String = "",
-    val lastMessageTime: Timestamp = Timestamp.now(),
-    val createdBy: String = "",
+    val name: String = "", val lastMessage: String = "",
     val lastMessageSender: String = "",
-    val typingUsers: List<String> = emptyList()
+    val lastMessageTime: Long = System.currentTimeMillis(),
 )

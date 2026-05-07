@@ -21,11 +21,11 @@ data class StepStats(
 )
 
 data class LeaderboardEntry(
-    val userId: String,
-    val userName: String,
-    val userAvatar: String?,
-    val totalSteps: Int,
-    val dailyAverage: Int,
-    val streak: Int,
-    val rank: Int
+    val userId: String = "",
+    val userName: String = "",
+    val userAvatar: String? = null,
+    val totalSteps: Int = 0,
+    val dailyAverage: Int = 0,
+    val streak: Int = 0,
+    val rank: Int = 0
 )

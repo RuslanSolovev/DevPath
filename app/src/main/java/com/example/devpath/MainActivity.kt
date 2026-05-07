@@ -1,6 +1,7 @@
 package com.example.devpath
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -23,6 +24,7 @@ import com.example.devpath.data.repository.YdbRepository
 import com.example.devpath.ui.MainScreen
 import com.example.devpath.ui.theme.DevPathTheme
 import com.yandex.mapkit.MapKitFactory
+import com.yandex.mapkit.mapview.MapView
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -37,28 +39,24 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var insetsController: WindowInsetsControllerCompat
 
+    // ✅ MapView создаётся здесь и живёт всю жизнь Activity
+    private lateinit var mapView: MapView
+
     private val requestMultiplePermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val granted = permissions.entries.all { it.value }
-
         if (granted) {
             Toast.makeText(this, "Все разрешения получены", Toast.LENGTH_SHORT).show()
         } else {
             val deniedPermissions = permissions.filter { !it.value }.keys.joinToString()
-            Toast.makeText(
-                this,
-                "Некоторые разрешения отклонены: $deniedPermissions",
-                Toast.LENGTH_LONG
-            ).show()
+            Toast.makeText(this, "Некоторые разрешения отклонены: $deniedPermissions", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         enableEdgeToEdge()
-
         insetsController = WindowInsetsControllerCompat(window, window.decorView)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -67,20 +65,19 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        if (savedInstanceState != null) {
-            println("DEBUG: MainActivity onCreate - восстановление после поворота/сворачивания")
-        } else {
-            println("DEBUG: MainActivity onCreate - первый запуск")
-        }
+        // ✅ Создаём MapView один раз
+        mapView = MapView(this)
 
         // ✅ ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ YDB
         lifecycleScope.launch {
             try {
-                val success = ydbRepository.initDatabase()
-                if (success) {
-                    println("DEBUG: YDB база данных готова к работе")
+                val usersOk = ydbRepository.initDatabase()
+                val chatsOk = ydbRepository.initChatTables()
+
+                if (usersOk && chatsOk) {
+                    println("DEBUG: ✅ YDB база данных готова к работе")
                 } else {
-                    println("DEBUG: ⚠️ Не удалось инициализировать базу данных YDB")
+                    println("DEBUG: ⚠️ Частичная инициализация YDB")
                 }
             } catch (e: Exception) {
                 println("DEBUG: ❌ Ошибка инициализации YDB: ${e.message}")
@@ -92,7 +89,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             CompositionLocalProvider(LocalThemeRepository provides themeRepository) {
                 DevPathTheme {
-                    MainScreen()
+                    MainScreen(mapView = mapView)
                 }
             }
         }
@@ -101,13 +98,27 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         MapKitFactory.getInstance().onStart()
+        if (::mapView.isInitialized) {
+            mapView.onStart()
+        }
         println("DEBUG: MainActivity onStart - MapKit started")
     }
 
     override fun onStop() {
+        if (::mapView.isInitialized) {
+            mapView.onStop()
+        }
         MapKitFactory.getInstance().onStop()
         super.onStop()
         println("DEBUG: MainActivity onStop - MapKit stopped")
+    }
+
+    override fun onDestroy() {
+        if (::mapView.isInitialized) {
+            mapView.onStop()
+        }
+        super.onDestroy()
+        println("DEBUG: MainActivity onDestroy - Activity уничтожена")
     }
 
     override fun onResume() {
@@ -130,14 +141,8 @@ class MainActivity : ComponentActivity() {
         println("DEBUG: MainActivity onRestoreInstanceState - восстанавливаем состояние")
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        println("DEBUG: MainActivity onDestroy - Activity уничтожена")
-    }
-
     fun setFullScreen(enabled: Boolean) {
         val decorView = window.decorView
-
         if (enabled) {
             decorView.systemUiVisibility = (
                     View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
@@ -158,56 +163,20 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndRequestAllPermissions() {
         val permissionsToRequest = mutableListOf<String>()
-
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.RECORD_AUDIO
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.READ_MEDIA_IMAGES
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED)
                 permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-        }
-
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.READ_EXTERNAL_STORAGE
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
                 permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                 permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-
         if (permissionsToRequest.isNotEmpty()) {
-            if (permissionsToRequest.contains(Manifest.permission.RECORD_AUDIO) &&
-                shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
-            ) {
-                Toast.makeText(
-                    this,
-                    "Для голосового ввода необходимо разрешение на запись аудио",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-
+            if (permissionsToRequest.contains(Manifest.permission.RECORD_AUDIO) && shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO))
+                Toast.makeText(this, "Для голосового ввода необходимо разрешение на запись аудио", Toast.LENGTH_LONG).show()
             requestMultiplePermissionsLauncher.launch(permissionsToRequest.toTypedArray())
         }
     }

@@ -112,7 +112,6 @@ class ChatRepository @Inject constructor(
                 senderName = senderName,
                 text = text,  // ← текст и фото вместе
                 imageUrl = imageUrl,
-                timestamp = com.google.firebase.Timestamp.now(),
                 readBy = emptyList(),
                 deliveredTo = listOf(senderId),
                 replyToId = replyToId,
@@ -143,7 +142,7 @@ class ChatRepository @Inject constructor(
             val newReaction = Reaction(
                 userId = userId,
                 reaction = reaction,
-                timestamp = Timestamp.now()  // ← теперь работает
+
             )
 
             val messageRef = db.collection("messages").document(messageId)
@@ -198,12 +197,10 @@ class ChatRepository @Inject constructor(
                 senderName = senderName,
                 text = originalMessage.text,
                 imageUrl = originalMessage.imageUrl,
-                timestamp = Timestamp.now(),
+
                 readBy = emptyList(),
                 deliveredTo = listOf(senderId),
-                isForwarded = true,
-                forwardedFrom = originalMessage.messageId,
-                forwardedFromChatId = originalMessage.chatId
+
             )
 
             db.collection("messages").add(forwardedMessage).await()
@@ -539,7 +536,7 @@ class ChatRepository @Inject constructor(
             val chat = Chat(
                 type = "personal",
                 participants = listOf(userId1, userId2),
-                createdAt = com.google.firebase.Timestamp.now()
+
             )
             val docRef = db.collection("chats").add(chat).await()
             docRef.id
@@ -569,7 +566,7 @@ class ChatRepository @Inject constructor(
             val chat = Chat(
                 type = "personal",
                 participants = listOf(userId1, userId2),
-                createdAt = com.google.firebase.Timestamp.now()
+
             )
             val docRef = db.collection("chats").add(chat).await()
             chat.copy(chatId = docRef.id)
@@ -764,7 +761,7 @@ class ChatRepository @Inject constructor(
                 senderId = senderId,
                 senderName = senderName,
                 text = text,
-                timestamp = com.google.firebase.Timestamp.now(),
+
                 readBy = emptyList(),
                 deliveredTo = listOf(senderId),
                 replyToId = replyToId,
@@ -813,7 +810,7 @@ class ChatRepository @Inject constructor(
                 senderName = senderName,
                 text = "",
                 imageUrl = imageUrl,
-                timestamp = com.google.firebase.Timestamp.now(),
+
                 readBy = emptyList(),
                 deliveredTo = listOf(senderId),
                 replyToId = replyToId,

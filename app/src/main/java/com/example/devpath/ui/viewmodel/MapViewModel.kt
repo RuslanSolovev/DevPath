@@ -4,10 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.devpath.data.repository.EventsRepository
 import com.example.devpath.data.repository.LocationRepository
-import com.example.devpath.data.repository.ChatRepository
+import com.example.devpath.data.repository.YdbRepository
+import com.example.devpath.data.repository.UserLocation
+import com.example.devpath.data.repository.LocationSettings
 import com.example.devpath.domain.models.MapMarker
 import com.example.devpath.domain.models.UserProfile
-import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -21,17 +22,17 @@ import javax.inject.Inject
 class MapViewModel @Inject constructor(
     private val locationRepository: LocationRepository,
     private val eventsRepository: EventsRepository,
-    private val chatRepository: ChatRepository
+    private val ydbRepository: YdbRepository
 ) : ViewModel() {
 
     private val _currentLocation = MutableStateFlow<android.location.Location?>(null)
     val currentLocation: StateFlow<android.location.Location?> = _currentLocation.asStateFlow()
 
-    private val _nearbyUsers = MutableStateFlow<List<com.example.devpath.data.repository.UserLocation>>(emptyList())
-    val nearbyUsers: StateFlow<List<com.example.devpath.data.repository.UserLocation>> = _nearbyUsers.asStateFlow()
+    private val _nearbyUsers = MutableStateFlow<List<UserLocation>>(emptyList())
+    val nearbyUsers: StateFlow<List<UserLocation>> = _nearbyUsers.asStateFlow()
 
-    private val _locationSettings = MutableStateFlow(locationRepository.locationSettings.value)
-    val locationSettings: StateFlow<com.example.devpath.data.repository.LocationSettings> = _locationSettings.asStateFlow()
+    private val _locationSettings = MutableStateFlow(LocationSettings())
+    val locationSettings: StateFlow<LocationSettings> = _locationSettings.asStateFlow()
 
     private val _friends = MutableStateFlow<List<UserProfile>>(emptyList())
     val friends: StateFlow<List<UserProfile>> = _friends.asStateFlow()
@@ -42,201 +43,164 @@ class MapViewModel @Inject constructor(
     private val _nearbyMarkers = MutableStateFlow<List<MapMarker>>(emptyList())
     val nearbyMarkers: StateFlow<List<MapMarker>> = _nearbyMarkers.asStateFlow()
 
-    private val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
-
     init {
-        // 🔹 ЭТАП 1: Локация (высокий приоритет)
         viewModelScope.launch {
             locationRepository.currentLocation.collect { location ->
                 _currentLocation.value = location
-                updateMyLocation()
             }
         }
-
-        // 🔹 ЭТАП 2: Друзья (средний приоритет)
-        viewModelScope.launch {
-            if (currentUserId.isNotEmpty()) {
-                chatRepository.getFriends(currentUserId).collect { friendsList ->
-                    _friends.value = friendsList
-                    println("DEBUG: MapViewModel - друзья: ${friendsList.size}")
-                }
-            }
-        }
-
-        // 🔹 ЭТАП 3: Настройки (средний приоритет)
         viewModelScope.launch {
             locationRepository.locationSettings.collect { settings ->
                 _locationSettings.value = settings
             }
         }
-
-        // 🔹 ЭТАП 4: Профиль пользователя
-        viewModelScope.launch {
-            if (currentUserId.isNotEmpty()) {
-                val profile = chatRepository.getUser(currentUserId)
-                _currentUserProfile.value = profile
-                println("DEBUG: MapViewModel - профиль: ${profile?.name}")
-            }
-        }
-
-        // 🔹 ЭТАП 5: Загружаем nearby users
-        viewModelScope.launch {
-            delay(1000)
-            loadNearbyUsers()
-        }
     }
 
-    fun startLocationUpdates() {
+    fun startLocationUpdates(userId: String, userName: String, avatarUrl: String?) {
         viewModelScope.launch {
             locationRepository.startLocationUpdates()
-        }
-    }
 
-    private suspend fun updateMyLocation() {
-        if (currentUserId.isNotEmpty()) {
-            val user = chatRepository.getUser(currentUserId)
+            // Загружаем профиль пользователя из YDB
+            val user = ydbRepository.getUser(userId)
+            _currentUserProfile.value = UserProfile(
+                userId = userId,
+                name = user?.optJSONObject("name")?.optString("S", userName) ?: userName,
+                avatarUrl = user?.optJSONObject("avatar_url")?.optString("S", "")?.ifEmpty { null }
+            )
+
+            // Загружаем друзей из YDB
+            val friendIds = ydbRepository.getUserFriends(userId)
+            _friends.value = friendIds.mapNotNull { friendId ->
+                val friendUser = ydbRepository.getUser(friendId)
+                friendUser?.let {
+                    UserProfile(
+                        userId = friendId,
+                        name = it.optJSONObject("name")?.optString("S", "") ?: "",
+                        email = it.optJSONObject("email")?.optString("S", "") ?: "",
+                        avatarUrl = it.optJSONObject("avatar_url")?.optString("S", "")?.ifEmpty { null }
+                    )
+                }
+            }
+
+            // Обновляем свою локацию
             locationRepository.updateUserLocation(
-                currentUserId,
-                user?.name ?: "Пользователь",
-                user?.avatarUrl
+                userId,
+                _currentUserProfile.value?.name ?: userName,
+                _currentUserProfile.value?.avatarUrl
             )
         }
     }
 
     fun loadNearbyUsers() {
         viewModelScope.launch {
-            if (currentUserId.isEmpty()) return@launch
-            val friendsIds = _friends.value.map { it.userId }
-            locationRepository.getNearbyUsers(
-                currentUserId,
-                _locationSettings.value.visibility,
-                friendsIds
-            ).collect { users ->
-                _nearbyUsers.value = users
-                println("DEBUG: MapViewModel - пользователей рядом: ${users.size}")
+            while (true) {
+                try {
+                    _nearbyUsers.value = locationRepository.getNearbyUsers()
+                } catch (e: Exception) {
+                    println("DEBUG: MapViewModel - ошибка загрузки nearby users: ${e.message}")
+                }
+                delay(10000)
             }
         }
     }
 
-    private var markersJob: Job? = null
 
-    fun updateMarkerLocation(latitude: Double, longitude: Double) {
-        markersJob?.cancel()
-        markersJob = viewModelScope.launch {
-            if (currentUserId.isEmpty()) return@launch
-            eventsRepository.getNearbyMarkers(
-                userId = currentUserId,
-                latitude = latitude,
-                longitude = longitude,
-                maxRadiusMeters = 50000,
-                limit = 50
-            ).collect { markers ->
+    fun loadNearbyMarkers(userId: String, latitude: Double, longitude: Double) {
+        viewModelScope.launch {
+            eventsRepository.getNearbyMarkers(userId, latitude, longitude).collect { markers ->
                 _nearbyMarkers.value = markers
                 println("DEBUG: MapViewModel - маркеров загружено: ${markers.size}")
             }
         }
     }
 
-    // 🔹 СОЗДАНИЕ МАРКЕРА - ИСПОЛЬЗУЕМ EventsRepository
     suspend fun createMarker(marker: MapMarker): String {
-        return try {
-            println("DEBUG: MapViewModel - создание маркера: ${marker.title} (${marker.type})")
-            val markerId = eventsRepository.createMarker(marker)
-            println("DEBUG: MapViewModel - маркер создан с ID: $markerId")
-            markerId
-        } catch (e: Exception) {
-            println("DEBUG: MapViewModel - ошибка создания маркера: ${e.message}")
-            e.printStackTrace()
-            throw e
-        }
+        return eventsRepository.createMarker(marker)
     }
 
-    // 🔹 ПРИСОЕДИНИТЬСЯ К МАРКЕРУ
     suspend fun joinMarker(markerId: String) {
-        try {
-            println("DEBUG: MapViewModel - присоединение к маркеру: $markerId")
-            eventsRepository.joinMarker(markerId, currentUserId)
-            println("DEBUG: MapViewModel - присоединились к маркеру")
-        } catch (e: Exception) {
-            println("DEBUG: MapViewModel - ошибка присоединения: ${e.message}")
-            throw e
-        }
+        val userId = _currentUserProfile.value?.userId ?: return
+        eventsRepository.joinMarker(markerId, userId)
     }
 
-    // 🔹 ПОКИНУТЬ МАРКЕР
     suspend fun leaveMarker(markerId: String) {
-        try {
-            println("DEBUG: MapViewModel - выход из маркера: $markerId")
-            eventsRepository.leaveMarker(markerId, currentUserId)
-            println("DEBUG: MapViewModel - вышли из маркера")
-        } catch (e: Exception) {
-            println("DEBUG: MapViewModel - ошибка выхода: ${e.message}")
-            throw e
-        }
+        val userId = _currentUserProfile.value?.userId ?: return
+        eventsRepository.leaveMarker(markerId, userId)
     }
 
-    // 🔹 ПОЖАЛОВАТЬСЯ НА МАРКЕР
     suspend fun reportMarker(markerId: String, reason: String) {
-        try {
-            println("DEBUG: MapViewModel - жалоба на маркер: $markerId")
-            eventsRepository.reportMarker(markerId, currentUserId, reason)
-            println("DEBUG: MapViewModel - жалоба отправлена")
-        } catch (e: Exception) {
-            println("DEBUG: MapViewModel - ошибка жалобы: ${e.message}")
-            throw e
-        }
+        val userId = _currentUserProfile.value?.userId ?: return
+        eventsRepository.reportMarker(markerId, userId, reason)
     }
 
-    // 🔹 УВЕЛИЧИТЬ ПРОСМОТРЫ
     suspend fun incrementMarkerViews(markerId: String) {
-        try {
-            eventsRepository.incrementMarkerViews(markerId)
-        } catch (e: Exception) {
-            println("DEBUG: MapViewModel - ошибка просмотров: ${e.message}")
-        }
+        eventsRepository.incrementMarkerViews(markerId)
     }
 
-    // 🔹 ПОЛУЧИТЬ МАРКЕР
     suspend fun getMarker(markerId: String): MapMarker? {
         return eventsRepository.getMarker(markerId)
     }
 
-    // 🔹 ПОЛУЧИТЬ ИЛИ СОЗДАТЬ ЧАТ
     suspend fun getOrCreatePersonalChat(userId1: String, userId2: String): String {
-        return chatRepository.findOrCreatePersonalChat(userId1, userId2)
+        // Ищем существующий чат
+        val existingChats = ydbRepository.getUserChats(userId1)
+        val existing = existingChats.find { chat ->
+            val participants = chat.optJSONObject("participants")?.optJSONArray("SS")
+            participants != null && (0 until participants.length()).any { participants.getString(it) == userId2 }
+        }
+        if (existing != null) {
+            return existing.optJSONObject("chat_id")?.optString("S") ?: ""
+        }
+        // Создаём новый чат
+        val chatId = java.util.UUID.randomUUID().toString()
+        ydbRepository.createChat(chatId, "personal", listOf(userId1, userId2), "", userId1)
+        return chatId
     }
 
-    fun loadLocationSettings() {
+    fun loadLocationSettings(userId: String) {
         viewModelScope.launch {
-            val settings = locationRepository.loadLocationSettings(currentUserId)
+            val settings = locationRepository.loadLocationSettings(userId)
             _locationSettings.value = settings
         }
     }
 
-    fun updateLocationSettings(settings: com.example.devpath.data.repository.LocationSettings) {
+    fun updateLocationSettings(settings: LocationSettings, userId: String) {
         viewModelScope.launch {
-            locationRepository.saveLocationSettings(currentUserId, settings)
+            locationRepository.saveLocationSettings(userId, settings)
             _locationSettings.value = settings
         }
     }
 
-    fun loadFriends() {
+    fun loadFriends(userId: String) {
         viewModelScope.launch {
-            if (currentUserId.isNotEmpty()) {
-                chatRepository.getFriends(currentUserId).collect { friendsList ->
-                    _friends.value = friendsList
+            val friendIds = ydbRepository.getUserFriends(userId)
+            _friends.value = friendIds.mapNotNull { friendId ->
+                val friendUser = ydbRepository.getUser(friendId)
+                friendUser?.let {
+                    UserProfile(
+                        userId = friendId,
+                        name = it.optJSONObject("name")?.optString("S", "") ?: "",
+                        email = it.optJSONObject("email")?.optString("S", "") ?: "",
+                        avatarUrl = it.optJSONObject("avatar_url")?.optString("S", "")?.ifEmpty { null }
+                    )
                 }
             }
         }
     }
 
-    fun sendFriendRequest(toUserId: String) {
+    fun sendFriendRequest(fromUserId: String, toUserId: String) {
         viewModelScope.launch {
-            chatRepository.sendFriendRequest(currentUserId, toUserId)
+            ydbRepository.sendFriendRequest(fromUserId, toUserId)
         }
     }
 
     suspend fun getUserProfile(userId: String): UserProfile? {
-        return chatRepository.getUser(userId)
+        val user = ydbRepository.getUser(userId) ?: return null
+        return UserProfile(
+            userId = userId,
+            name = user.optJSONObject("name")?.optString("S", "") ?: "",
+            email = user.optJSONObject("email")?.optString("S", "") ?: "",
+            avatarUrl = user.optJSONObject("avatar_url")?.optString("S", "")?.ifEmpty { null }
+        )
     }
 }

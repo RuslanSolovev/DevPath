@@ -1,12 +1,13 @@
 package com.example.devpath.domain.models
 
-import com.google.firebase.Timestamp
+
 
 data class Reaction(
     val userId: String = "",
-    val reaction: String = "", // 👍, ❤️, 😂, 😮, 😢, 😡
-    val timestamp: Timestamp = Timestamp.now()
+    val reaction: String = "",
 )
+
+
 
 data class Message(
     val messageId: String = "",
@@ -14,18 +15,14 @@ data class Message(
     val senderId: String = "",
     val senderName: String = "",
     val text: String = "",
-    val timestamp: Timestamp = Timestamp.now(),
+    val imageUrl: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    val edited: Boolean = false,
+    val deleted: Boolean = false,
     val readBy: List<String> = emptyList(),
     val deliveredTo: List<String> = emptyList(),
     val replyToId: String = "",
-    val imageUrl: String = "",
     val replyToText: String = "",
     val replyToSenderName: String = "",
-    val edited: Boolean = false,
-    val editedAt: Timestamp? = null,
-    val deleted: Boolean = false,
-    val reactions: List<Reaction> = emptyList(), // Добавляем реакции
-    val forwardedFrom: String = "", // ID исходного сообщения при пересылке
-    val forwardedFromChatId: String = "", // Откуда переслано
-    val isForwarded: Boolean = false // Флаг пересланного сообщения
+    val reactions: List<Reaction> = emptyList()
 )
