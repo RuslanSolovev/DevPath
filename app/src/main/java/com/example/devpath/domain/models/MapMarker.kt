@@ -6,7 +6,6 @@ import com.google.firebase.Timestamp
 enum class MarkerType {
     ANNOUNCEMENT,  // 📢 Объявление (только чтение)
     EVENT,         // 🎉 Событие (можно участвовать)
-    COMMUNITY,     // 👥 Сообщество (групповой чат)
     DISCUSSION     // 💬 Обсуждение (временный чат)
 }
 

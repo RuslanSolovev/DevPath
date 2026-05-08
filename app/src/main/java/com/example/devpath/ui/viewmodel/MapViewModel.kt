@@ -104,7 +104,6 @@ class MapViewModel @Inject constructor(
         }
     }
 
-
     fun loadNearbyMarkers(userId: String, latitude: Double, longitude: Double) {
         viewModelScope.launch {
             eventsRepository.getNearbyMarkers(userId, latitude, longitude).collect { markers ->
@@ -139,6 +138,11 @@ class MapViewModel @Inject constructor(
 
     suspend fun getMarker(markerId: String): MapMarker? {
         return eventsRepository.getMarker(markerId)
+    }
+
+    // ✅ НОВЫЙ МЕТОД: Удаление маркера
+    suspend fun deleteMarker(markerId: String, chatId: String?) {
+        eventsRepository.deleteMarker(markerId, chatId)
     }
 
     suspend fun getOrCreatePersonalChat(userId1: String, userId2: String): String {

@@ -24,8 +24,6 @@ class EventsRepository @Inject constructor(
     private val scope = CoroutineScope(Dispatchers.IO)
 
     suspend fun initMarkersTable() {
-        // Используем публичный метод initTable из YdbRepository (нужно сделать его публичным)
-        // Или вызываем через создание таблицы напрямую
         val body = JSONObject().apply {
             put("TableName", markersTable)
             put("KeySchema", JSONArray().apply {
@@ -119,7 +117,8 @@ class EventsRepository @Inject constructor(
         }
         ydbRepository.executeSignedRequest("PutItem", body)
 
-        if (marker.type == MarkerType.COMMUNITY || marker.type == MarkerType.DISCUSSION) {
+        // Создаём чат для EVENT и DISCUSSION
+        if (marker.type == MarkerType.EVENT || marker.type == MarkerType.DISCUSSION) {
             val chatId = UUID.randomUUID().toString()
             ydbRepository.createChat(chatId, "community", listOf(marker.createdBy), marker.title, marker.createdBy)
             ydbRepository.executeSignedRequest("UpdateItem", JSONObject().apply {
@@ -177,11 +176,47 @@ class EventsRepository @Inject constructor(
         return mapJsonToMarker(item)
     }
 
+    // ✅ НОВЫЙ МЕТОД: Удаление маркера и связанного чата
+    suspend fun deleteMarker(markerId: String, chatId: String?): Boolean {
+        return try {
+            println("DEBUG: deleteMarker - удаляем маркер: $markerId, чат: $chatId")
+
+            // 1. Удаляем связанный чат, если он существует
+            if (chatId != null && chatId.isNotEmpty() && chatId != "auto") {
+                println("DEBUG: deleteMarker - удаляем чат: $chatId")
+                val chatDeleted = ydbRepository.deleteChat(chatId)
+                println("DEBUG: deleteMarker - чат удалён: $chatDeleted")
+            }
+
+            // 2. Удаляем саму метку
+            val key = JSONObject().apply {
+                put("marker_id", JSONObject().put("S", markerId))
+            }
+            val body = JSONObject().apply {
+                put("TableName", markersTable)
+                put("Key", key)
+            }
+            val result = ydbRepository.executeSignedRequest("DeleteItem", body)
+            val success = result != null
+
+            println("DEBUG: deleteMarker - метка удалена: $success")
+            return success
+        } catch (e: Exception) {
+            println("ERROR: deleteMarker - ${e.message}")
+            e.printStackTrace()
+            false
+        }
+    }
+
     private fun mapJsonToMarker(json: JSONObject): MapMarker? {
         return try {
             MapMarker(
                 id = json.optJSONObject("marker_id")?.optString("S") ?: return null,
-                type = try { MarkerType.valueOf(json.optJSONObject("type")?.optString("S") ?: "ANNOUNCEMENT") } catch (e: Exception) { MarkerType.ANNOUNCEMENT },
+                type = try {
+                    MarkerType.valueOf(json.optJSONObject("type")?.optString("S") ?: "ANNOUNCEMENT")
+                } catch (e: Exception) {
+                    MarkerType.ANNOUNCEMENT
+                },
                 title = json.optJSONObject("title")?.optString("S") ?: "",
                 description = json.optJSONObject("description")?.optString("S") ?: "",
                 createdBy = json.optJSONObject("created_by")?.optString("S") ?: "",

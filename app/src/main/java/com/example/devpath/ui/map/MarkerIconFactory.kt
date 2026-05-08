@@ -43,7 +43,6 @@ class MarkerIconFactory(private val context: Context) {
     fun getEventIcon(type: String): ImageProvider {
         val key = "event_$type"
         cache[key]?.let { return it }
-
         val bitmap = createEventBitmap(type)
         val provider = ImageProvider.fromBitmap(bitmap)
         cache[key] = provider
@@ -147,9 +146,8 @@ class MarkerIconFactory(private val context: Context) {
     private fun createEventBitmap(type: String): Bitmap {
         var color = when (type) {
             "ANNOUNCEMENT" -> AndroidColor.rgb(33, 150, 243)
-            "EVENT" -> AndroidColor.rgb(76, 175, 80)
-            "COMMUNITY" -> AndroidColor.rgb(156, 39, 176)
-            "DISCUSSION" -> AndroidColor.rgb(255, 152, 0)
+            "EVENT" -> AndroidColor.rgb(76, 175, 80)      // зелёный для событий
+            "DISCUSSION" -> AndroidColor.rgb(255, 152, 0) // оранжевый для обсуждений
             else -> AndroidColor.rgb(33, 150, 243)
         }
         val size = 100
@@ -161,10 +159,12 @@ class MarkerIconFactory(private val context: Context) {
         canvas.drawCircle(size / 2f, size / 2f, size / 2f - 8, paint)
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = AndroidColor.WHITE; textSize = 36f; textAlign = Paint.Align.CENTER
-            typeface = Typeface.defaultFromStyle(Typeface.BOLD)
+            typeface = Typeface.DEFAULT_BOLD
         }
         val iconChar = when (type) {
-            "ANNOUNCEMENT" -> "📢"; "EVENT" -> "🎉"; "COMMUNITY" -> "👥"; "DISCUSSION" -> "💬"
+            "ANNOUNCEMENT" -> "📢"
+            "EVENT" -> "🎉"
+            "DISCUSSION" -> "💬"
             else -> "📍"
         }
         canvas.drawText(iconChar, size / 2f, size / 2f + 12f, textPaint)
