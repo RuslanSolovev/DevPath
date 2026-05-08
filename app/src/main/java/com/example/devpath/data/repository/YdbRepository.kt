@@ -796,6 +796,7 @@ class YdbRepository @Inject constructor() {
             senderName = senderName,
             text = forwardedText,
             imageUrl = imageUrl
+
         )
     }
 
