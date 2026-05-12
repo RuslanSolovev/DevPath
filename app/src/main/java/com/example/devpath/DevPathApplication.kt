@@ -3,6 +3,7 @@ package com.example.devpath
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.example.devpath.data.repository.YdbRepository
+import com.example.devpath.utils.SessionManager
 import com.yandex.mapkit.MapKitFactory
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -17,6 +18,7 @@ class DevPathApplication : Application() {
     lateinit var ydbRepository: YdbRepository
 
     override fun onCreate() {
+        SessionManager.init(this)
         super.onCreate()
 
         // 🔑 ИНИЦИАЛИЗАЦИЯ YANDEX MAPKIT

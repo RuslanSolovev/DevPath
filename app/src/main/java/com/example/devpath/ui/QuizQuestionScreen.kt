@@ -1,5 +1,6 @@
 package com.example.devpath.ui
 
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.devpath.utils.SessionManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,10 +42,8 @@ fun QuizQuestionScreen(question: QuizQuestion, onBack: () -> Unit) {
     var isAnswered by remember { mutableStateOf(false) }
     var showExplanation by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
-    val currentUser = Firebase.auth.currentUser
+    val userId = remember { SessionManager.getUserId() }
     val coroutineScope = rememberCoroutineScope()
-
-
 
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
@@ -108,14 +108,20 @@ fun QuizQuestionScreen(question: QuizQuestion, onBack: () -> Unit) {
                         isAnswered = true
                         showExplanation = true
 
-                        if (currentUser != null) {
+                        if (userId != null) {
                             coroutineScope.launch {
-                                progressRepo.saveQuizResult(
-                                    currentUser.uid,
-                                    question.id,
-                                    selectedOption == question.correctAnswerIndex
-                                )
-                                isLoading = false
+                                try {
+                                    progressRepo.saveQuizResult(
+                                        userId,
+                                        question.id,
+                                        selectedOption == question.correctAnswerIndex
+                                    )
+                                    Log.d("QuizQuestion", "✅ Результат теста сохранён")
+                                } catch (e: Exception) {
+                                    Log.e("QuizQuestion", "❌ Ошибка сохранения: ${e.message}")
+                                } finally {
+                                    isLoading = false
+                                }
                             }
                         } else {
                             isLoading = false

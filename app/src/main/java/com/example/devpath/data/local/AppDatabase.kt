@@ -36,11 +36,28 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
-        // Миграция с версии 2 на 3
+        // ✅ Миграция 1→2: создание user_progress
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `user_progress` (
+                        `userId` TEXT NOT NULL PRIMARY KEY,
+                        `displayName` TEXT NOT NULL,
+                        `completedLessons` TEXT NOT NULL,
+                        `completedPracticeTasks` TEXT NOT NULL,
+                        `quizResults` TEXT NOT NULL,
+                        `favoriteInterviewQuestions` TEXT NOT NULL,
+                        `totalXP` INTEGER NOT NULL,
+                        `level` INTEGER NOT NULL,
+                        `generalTestHistory` TEXT NOT NULL
+                    )
+                """)
+            }
+        }
+
+        // Миграция 2→3: создание chat_sessions и chat_messages
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(database: SupportSQLiteDatabase) {
-
-                // 1. Создаем таблицу chat_sessions с ПРАВИЛЬНЫМИ типами
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS `chat_sessions` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -52,7 +69,6 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                 """)
 
-                // 2. Создаем таблицу chat_messages
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS `chat_messages` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -65,13 +81,11 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                 """)
 
-                // 3. ✅ ВАЖНО: Создаем индекс для userId (как ожидает Room)
                 database.execSQL("""
                     CREATE INDEX IF NOT EXISTS `index_chat_sessions_userId` 
                     ON `chat_sessions` (`userId`)
                 """)
 
-                // 4. ✅ ВАЖНО: Создаем индекс для sessionId
                 database.execSQL("""
                     CREATE INDEX IF NOT EXISTS `index_chat_messages_sessionId` 
                     ON `chat_messages` (`sessionId`)
@@ -79,10 +93,9 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        // Миграция с версии 3 на 4 - создаем таблицу test_attempts
+        // Миграция 3→4: создание test_attempts
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(database: SupportSQLiteDatabase) {
-                // Создаем таблицу test_attempts без индекса
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS `test_attempts` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -92,19 +105,6 @@ abstract class AppDatabase : RoomDatabase() {
                         `correctAnswers` INTEGER NOT NULL,
                         `detailsJson` TEXT NOT NULL
                     )
-                """)
-
-                // НЕ создаем индекс здесь - Room создаст его сам при проверке
-                // Индекс будет создан автоматически, если он определен в аннотациях @Entity
-            }
-        }
-
-        // Если нужно добавить индекс позже, используйте отдельную миграцию
-        private val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL("""
-                    CREATE INDEX IF NOT EXISTS `index_test_attempts_userId` 
-                    ON `test_attempts` (`userId`)
                 """)
             }
         }
@@ -116,8 +116,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "devpath_database"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .fallbackToDestructiveMigration() // На крайний случай — пересоздаст БД
                     .build()
                 INSTANCE = instance
                 instance

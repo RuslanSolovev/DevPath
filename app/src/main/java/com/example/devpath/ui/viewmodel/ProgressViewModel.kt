@@ -9,3 +9,4 @@ import javax.inject.Inject
 class ProgressViewModel @Inject constructor(
     val progressRepository: ProgressRepository
 ) : ViewModel()
+

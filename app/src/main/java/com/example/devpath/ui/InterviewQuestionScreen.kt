@@ -33,18 +33,18 @@ fun InterviewQuestionScreen(
 
     // Цвет для сложности
     val difficultyColor = when (question.difficulty.lowercase()) {
-        "beginner" -> Color(0xFF10B981) // Зеленый
-        "intermediate" -> Color(0xFFF59E0B) // Оранжевый
-        "advanced" -> Color(0xFFEF4444) // Красный
+        "beginner" -> Color(0xFF10B981)
+        "intermediate" -> Color(0xFFF59E0B)
+        "advanced" -> Color(0xFFEF4444)
         else -> MaterialTheme.colorScheme.primary
     }
 
     // Цвет для категории
     val categoryColor = when (question.category.lowercase()) {
-        "kotlin" -> Color(0xFF7C3AED) // Фиолетовый
-        "android" -> Color(0xFF3B82F6) // Синий
-        "algorithms" -> Color(0xFF8B5CF6) // Индиго
-        "general" -> Color(0xFF059669) // Изумрудный
+        "kotlin" -> Color(0xFF7C3AED)
+        "android" -> Color(0xFF3B82F6)
+        "algorithms" -> Color(0xFF8B5CF6)
+        "general" -> Color(0xFF059669)
         else -> MaterialTheme.colorScheme.primary
     }
 
@@ -53,7 +53,7 @@ fun InterviewQuestionScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // TopAppBar (теперь это просто заголовок с кнопками)
+        // TopAppBar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -376,7 +376,6 @@ fun InterviewQuestionScreen(
                         )
                     }
 
-                    // Динамические ключевые моменты в зависимости от категории
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)

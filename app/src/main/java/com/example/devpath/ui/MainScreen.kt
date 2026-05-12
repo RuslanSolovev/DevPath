@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -37,6 +38,10 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import com.example.devpath.data.repository.LessonRepository
+import com.example.devpath.data.repository.PracticeRepository
+import com.example.devpath.data.repository.QuizRepository
+import com.example.devpath.ui.navigation.BottomNavigationScreen
 import org.json.JSONArray
 import org.json.JSONObject
 import com.example.devpath.utils.Config
@@ -184,140 +189,293 @@ fun MainScreen(mapView: MapView? = null) {
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                NavHost(
-                    navController = navController,
-                    startDestination = MainTab2.HOME.name
+                // Оборачиваем в провайдер вместо передачи параметра
+                val viewModelStoreOwner = checkNotNull(LocalViewModelStoreOwner.current) {
+                    "No ViewModelStoreOwner was provided via LocalViewModelStoreOwner"
+                }
+
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalViewModelStoreOwner provides viewModelStoreOwner
                 ) {
-                    composable(MainTab2.HOME.name) {
-                        HomeTabScreen(
-                            ydbRepository = ydbRepository,
-                            currentUserId = currentUserId,
-                            currentUserName = currentUserName,
-                            currentUserEmail = currentUserEmail,
-                            currentUserAvatar = currentUserAvatar,
-                            onNavigateToProfile = { navController.navigate("profile") },
-                            onNavigateToSettings = { navController.navigate("settings") },
-                            onNavigateToStepCounter = { navController.navigate("step_counter") },
-                            onNavigateToMap = { navController.navigate("map") },
-                            onNavigateToGamesHub = { navController.navigate("games_hub") }
-                        )
-                    }
-
-                    composable(MainTab2.CHAT.name) {
-                        ChatsScreen(
-                            ydbRepository = ydbRepository,
-                            currentUserId = currentUserId,
-                            navController = navController
-                        )
-                    }
-
-                    composable(MainTab2.TEXTBOOK.name) {
-                        DevPathNavGraph(
-                            navController = navController,
-                            onNavigationVisibilityChanged = { isVisible ->
-                                showMainNavigation = isVisible
-                            }
-                        )
-                    }
-
-                    composable("profile") {
-                        ProfileScreen(
-                            ydbRepository = ydbRepository,
-                            currentUserId = currentUserId,
-                            navController = navController,
-                            onNavigateToTabs = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable("settings") {
-                        SettingsScreen(
-                            onBack = { navController.popBackStack() },
-                            onLogout = {
-                                coroutineScope.launch {
-                                    val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
-                                    prefs.edit().clear().apply()
-                                    isAuthenticated = false
-                                    currentUserId = ""
-                                    currentUserName = ""
-                                    currentUserEmail = ""
-                                    currentUserAvatar = ""
-                                }
-                            }
-                        )
-                    }
-
-                    composable("friends") {
-                        FriendsScreen(
-                            ydbRepository = ydbRepository,
-                            currentUserId = currentUserId,
-                            navController = navController
-                        )
-                    }
-
-                    composable("search_friends") {
-                        SearchFriendsScreen(
-                            ydbRepository = ydbRepository,
-                            currentUserId = currentUserId,
-                            navController = navController
-                        )
-                    }
-
-                    composable("step_counter") { StepCounterScreen(navController = navController) }
-
-                    // ✅ Передаём mapView в MapScreen
-                    composable("map") {
-                        if (mapView != null) {
-                            MapScreen(navController = navController, mapView = mapView)
+                    NavHost(
+                        navController = navController,
+                        startDestination = MainTab2.HOME.name
+                    ) {
+                        composable(MainTab2.HOME.name) {
+                            HomeTabScreen(
+                                ydbRepository = ydbRepository,
+                                currentUserId = currentUserId,
+                                currentUserName = currentUserName,
+                                currentUserEmail = currentUserEmail,
+                                currentUserAvatar = currentUserAvatar,
+                                onNavigateToProfile = { navController.navigate("profile") },
+                                onNavigateToSettings = { navController.navigate("settings") },
+                                onNavigateToStepCounter = { navController.navigate("step_counter") },
+                                onNavigateToMap = { navController.navigate("map") },
+                                onNavigateToGamesHub = { navController.navigate("games_hub") }
+                            )
                         }
-                    }
 
-                    composable("games_hub") { GamesHubScreen(navController = navController) }
+                        composable(MainTab2.CHAT.name) {
+                            ChatsScreen(
+                                ydbRepository = ydbRepository,
+                                currentUserId = currentUserId,
+                                navController = navController
+                            )
+                        }
 
-                    composable(
-                        route = "journey_map/{steps}",
-                        arguments = listOf(navArgument("steps") { type = NavType.IntType })
-                    ) { backStackEntry ->
-                        val steps = backStackEntry.arguments?.getInt("steps") ?: 0
-                        JourneyMapScreen(navController = navController, totalSteps = steps)
-                    }
+                        composable(MainTab2.TEXTBOOK.name) {
+                            DashboardScreen(
+                                onNavigateToTabs = { initialTab ->
+                                    navController.navigate("tabs/$initialTab")
+                                },
+                                onNavigateToPractice = {
+                                    navController.navigate("tabs/practice")
+                                },
+                                onNavigateToQuiz = {
+                                    navController.navigate("tabs/quiz")
+                                },
+                                onNavigateToInterview = {
+                                    navController.navigate("tabs/interview")
+                                },
+                                parentNavController = navController,
+                                showNavigationButtons = showMainNavigation
+                            )
+                        }
 
-                    composable(
-                        route = "chat_detail/{chatId}/{friendId}",
-                        arguments = listOf(
-                            navArgument("chatId") { type = NavType.StringType },
-                            navArgument("friendId") { type = NavType.StringType; defaultValue = "" }
-                        )
-                    ) { backStackEntry ->
-                        val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
-                        val friendId = backStackEntry.arguments?.getString("friendId") ?: ""
-                        ChatDetailScreen(
-                            chatId = chatId,
-                            friendId = friendId,
-                            currentUserId = currentUserId,
-                            ydbRepository = ydbRepository,
-                            navController = navController
-                        )
-                    }
+                        // ✅ МАРШРУТЫ ВКЛАДОК
+                        composable(
+                            route = "tabs/{initialTab}",
+                            arguments = listOf(navArgument("initialTab") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val initialTab = backStackEntry.arguments?.getString("initialTab") ?: "learning"
+                            BottomNavigationScreen(
+                                initialTab = initialTab,
+                                onSignOut = {
+                                    coroutineScope.launch {
+                                        val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+                                        prefs.edit().clear().apply()
+                                        isAuthenticated = false
+                                        currentUserId = ""
+                                        currentUserName = ""
+                                        currentUserEmail = ""
+                                        currentUserAvatar = ""
+                                    }
+                                },
+                                parentNavController = navController,
+                                onNavigateBack = {
+                                    navController.popBackStack()
+                                }
+                            )
+                        }
 
-                    composable(
-                        route = "search_messages/{chatId}",
-                        arguments = listOf(navArgument("chatId") { type = NavType.StringType })
-                    ) { backStackEntry ->
-                        val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
-                        SearchMessagesScreen(
-                            chatId = chatId,
-                            navController = navController
-                        )
-                    }
+                        // ✅ МАРШРУТЫ УРОКОВ
+                        composable(
+                            route = "lesson/{lessonId}",
+                            arguments = listOf(navArgument("lessonId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val lessonId = backStackEntry.arguments?.getString("lessonId") ?: "kotlin_basics"
+                            val lesson = LessonRepository.getLessonById(lessonId) ?: LessonRepository.getLessons().first()
+                            LessonScreen(
+                                lessonTitle = lesson.title,
+                                lessonContent = lesson.theory,
+                                lessonId = lessonId,
+                                onBack = { navController.popBackStack() },
+                                onNavigateToPractice = { taskId -> navController.navigate("practice/$taskId") },
+                                onNavigateToQuiz = { questionId -> navController.navigate("quiz/question/$questionId") },
+                                onNavigateToGeneralTest = { navController.navigate("quiz/general_test") }
+                            )
+                        }
 
-                    composable(
-                        route = "fullscreen_image/{imageUrl}",
-                        arguments = listOf(navArgument("imageUrl") { type = NavType.StringType; defaultValue = "" })
-                    ) { backStackEntry ->
-                        val encodedUrl = backStackEntry.arguments?.getString("imageUrl") ?: ""
-                        val imageUrl = Uri.decode(encodedUrl)
-                        if (imageUrl.isNotEmpty()) {
-                            FullScreenImageView(imageUrl = imageUrl, navController = navController)
+                        // ✅ МАРШРУТЫ ПРАКТИКИ
+                        composable(
+                            route = "practice/{taskId}",
+                            arguments = listOf(navArgument("taskId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val taskId = backStackEntry.arguments?.getString("taskId") ?: "hello_world"
+                            val task = PracticeRepository.getTaskById(taskId) ?: PracticeRepository.getPracticeTasks().first()
+                            PracticeTaskScreen(
+                                task = task,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        // ✅ МАРШРУТЫ ВИКТОРИН
+                        composable(
+                            route = "quiz/question/{questionId}",
+                            arguments = listOf(navArgument("questionId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val questionId = backStackEntry.arguments?.getString("questionId") ?: "q1"
+                            val question = QuizRepository.getQuestionById(questionId) ?: QuizRepository.getQuizQuestions().first()
+                            QuizQuestionScreen(
+                                question = question,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        // ✅ ОБЩИЙ ТЕСТ
+                        composable("quiz/general_test") {
+                            GeneralTestScreenContent(
+                                navController = navController,
+                                onBackToDashboard = {
+                                    navController.navigate(MainTab2.TEXTBOOK.name) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            )
+                        }
+
+                        // ✅ РЕЗУЛЬТАТЫ ТЕСТА
+                        composable(
+                            route = "quiz/test_results/{attemptId}",
+                            arguments = listOf(navArgument("attemptId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val attemptId = backStackEntry.arguments?.getLong("attemptId") ?: -1L
+                            TestResultsScreen(
+                                attemptId = attemptId,
+                                navController = navController,
+                                onRetry = {
+                                    navController.navigate("quiz/general_test") {
+                                        popUpTo("quiz/test_results/{attemptId}") { inclusive = true }
+                                    }
+                                },
+                                onBackToMain = {
+                                    navController.navigate(MainTab2.TEXTBOOK.name) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                },
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        // ✅ ДЕТАЛЬНЫЙ РАЗБОР ТЕСТА
+                        composable(
+                            route = "quiz/test_detail/{attemptId}",
+                            arguments = listOf(navArgument("attemptId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val attemptId = backStackEntry.arguments?.getLong("attemptId") ?: -1L
+                            TestDetailScreen(
+                                attemptId = attemptId,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable("profile") {
+                            ProfileScreen(
+                                ydbRepository = ydbRepository,
+                                currentUserId = currentUserId,
+                                navController = navController,
+                                onNavigateToTabs = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable("settings") {
+                            SettingsScreen(
+                                onBack = { navController.popBackStack() },
+                                onLogout = {
+                                    coroutineScope.launch {
+                                        val prefs = context.getSharedPreferences(
+                                            "user_prefs",
+                                            android.content.Context.MODE_PRIVATE
+                                        )
+                                        prefs.edit().clear().apply()
+                                        isAuthenticated = false
+                                        currentUserId = ""
+                                        currentUserName = ""
+                                        currentUserEmail = ""
+                                        currentUserAvatar = ""
+                                    }
+                                }
+                            )
+                        }
+
+                        composable("friends") {
+                            FriendsScreen(
+                                ydbRepository = ydbRepository,
+                                currentUserId = currentUserId,
+                                navController = navController
+                            )
+                        }
+
+                        composable("search_friends") {
+                            SearchFriendsScreen(
+                                ydbRepository = ydbRepository,
+                                currentUserId = currentUserId,
+                                navController = navController
+                            )
+                        }
+
+                        composable("step_counter") {
+                            StepCounterScreen(navController = navController)
+                        }
+
+                        composable("map") {
+                            if (mapView != null) {
+                                MapScreen(navController = navController, mapView = mapView)
+                            }
+                        }
+
+                        composable("games_hub") {
+                            GamesHubScreen(navController = navController)
+                        }
+
+                        composable(
+                            route = "journey_map/{steps}",
+                            arguments = listOf(navArgument("steps") { type = NavType.IntType })
+                        ) { backStackEntry ->
+                            val steps = backStackEntry.arguments?.getInt("steps") ?: 0
+                            JourneyMapScreen(navController = navController, totalSteps = steps)
+                        }
+
+                        composable(
+                            route = "chat_detail/{chatId}/{friendId}",
+                            arguments = listOf(
+                                navArgument("chatId") { type = NavType.StringType },
+                                navArgument("friendId") {
+                                    type = NavType.StringType; defaultValue = ""
+                                }
+                            )
+                        ) { backStackEntry ->
+                            val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                            val friendId = backStackEntry.arguments?.getString("friendId") ?: ""
+                            ChatDetailScreen(
+                                chatId = chatId,
+                                friendId = friendId,
+                                currentUserId = currentUserId,
+                                ydbRepository = ydbRepository,
+                                navController = navController
+                            )
+                        }
+
+                        composable(
+                            route = "search_messages/{chatId}",
+                            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                            SearchMessagesScreen(
+                                chatId = chatId,
+                                navController = navController
+                            )
+                        }
+
+                        composable(
+                            route = "fullscreen_image/{imageUrl}",
+                            arguments = listOf(navArgument("imageUrl") {
+                                type = NavType.StringType; defaultValue = ""
+                            })
+                        ) { backStackEntry ->
+                            val encodedUrl = backStackEntry.arguments?.getString("imageUrl") ?: ""
+                            val imageUrl = Uri.decode(encodedUrl)
+                            if (imageUrl.isNotEmpty()) {
+                                FullScreenImageView(
+                                    imageUrl = imageUrl,
+                                    navController = navController
+                                )
+                            }
                         }
                     }
                 }

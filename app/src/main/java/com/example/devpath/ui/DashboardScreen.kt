@@ -2,6 +2,7 @@ package com.example.devpath.ui
 
 import android.app.Activity
 import android.content.res.Configuration
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -55,6 +56,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import com.example.devpath.utils.SessionManager
 
 // Enum для главных вкладок учебника
 enum class TextbookTab(
@@ -234,10 +236,12 @@ fun DashboardScreen(
     onNavigateToQuiz: () -> Unit = {},
     onNavigateToInterview: () -> Unit = {},
     parentNavController: NavHostController,
-    showNavigationButtons: Boolean = true  // новый параметр для скрытия кнопок
+    showNavigationButtons: Boolean = true
 ) {
     val activity = LocalContext.current as? Activity
-    val currentUser = Firebase.auth.currentUser
+    val context = LocalContext.current
+    val userId = remember { SessionManager.getUserId() }
+    val userIdKey = remember(userId) { userId ?: "guest" }
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
 
@@ -287,8 +291,6 @@ fun DashboardScreen(
     val totalLessonsCount = 12
     var userAchievements by remember { mutableStateOf(achievementsList) }
 
-    val userIdKey = remember(currentUser?.uid) { currentUser?.uid ?: "guest" }
-
     // Системная кнопка "Назад" сворачивает приложение только на главной вкладке учебника
     BackHandler(enabled = currentTab == TextbookTab.HOME) {
         activity?.moveTaskToBack(true)
@@ -300,7 +302,7 @@ fun DashboardScreen(
         completedPracticeCount = progress.completedPracticeTasks.size
         userTotalXP = progress.totalXP
         userLevel = calculateLevelFromXP(userTotalXP)
-        userDisplayName = progress.displayName.ifEmpty { currentUser?.displayName ?: "Гость" }
+        userDisplayName = progress.displayName.ifEmpty { "Гость" }
 
         userAchievements = achievementsList.map { achievement ->
             val achieved = when (achievement.id) {
@@ -327,37 +329,26 @@ fun DashboardScreen(
         }
     }
 
-    fun refreshData() {
-        if (currentUser != null) {
-            viewModel.viewModelScope.launch {
-                try {
-                    val freshProgress = progressRepo.loadProgress(currentUser.uid)
-                    freshProgress?.let { progress ->
-                        userProgress = progress
-                        updateStatsFromProgress(progress)
-                    }
-                } catch (e: Exception) {
-                    println("DEBUG: Ошибка обновления: ${e.message}")
-                }
-            }
-        }
-    }
-
     // Загрузка данных пользователя
     LaunchedEffect(userIdKey) {
-        if (!dataLoaded && currentUser != null) {
+        if (!dataLoaded && userId != null) {
             userIsLoading = true
             try {
-                val localProgress = progressRepo.loadLocalProgress(currentUser.uid)
+                val localProgress = progressRepo.loadLocalProgress(userId)
                 if (localProgress != null) {
                     userProgress = localProgress
                     updateStatsFromProgress(localProgress)
-                    userPhotoUrl = currentUser.photoUrl?.toString()
+                    // Загружаем имя из SharedPreferences
+                    val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+                    userDisplayName = prefs.getString("user_name", "Гость") ?: "Гость"
+                    userPhotoUrl = prefs.getString("user_avatar", null)
                 } else {
-                    userDisplayName = currentUser.displayName ?: "Гость"
+                    val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+                    userDisplayName = prefs.getString("user_name", "Гость") ?: "Гость"
                 }
+                // Загружаем полный прогресс
                 launch {
-                    val fullProgress = progressRepo.loadProgress(currentUser.uid)
+                    val fullProgress = progressRepo.loadProgress(userId)
                     fullProgress?.let { progress ->
                         userProgress = progress
                         updateStatsFromProgress(progress)
@@ -365,24 +356,38 @@ fun DashboardScreen(
                 }
                 dataLoaded = true
             } catch (e: Exception) {
-                userDisplayName = currentUser.displayName ?: "Гость"
+                Log.e("Dashboard", "Ошибка загрузки прогресса: ${e.message}")
+                val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
+                userDisplayName = prefs.getString("user_name", "Гость") ?: "Гость"
             } finally {
                 userIsLoading = false
             }
-        } else if (currentUser == null) {
+        } else if (userId == null) {
             userDisplayName = "Гость"
             userIsLoading = false
             dataLoaded = true
         }
     }
 
+    // Обновление при возврате на главную вкладку
     LaunchedEffect(currentTab, refreshTrigger) {
-        if (currentTab == TextbookTab.HOME && dataLoaded && currentUser != null) {
+        if (currentTab == TextbookTab.HOME && dataLoaded && userId != null) {
             delay(300)
-            refreshData()
+            viewModel.viewModelScope.launch {
+                try {
+                    val freshProgress = progressRepo.loadProgress(userId)
+                    freshProgress?.let { progress ->
+                        userProgress = progress
+                        updateStatsFromProgress(progress)
+                    }
+                } catch (e: Exception) {
+                    Log.e("Dashboard", "Ошибка обновления: ${e.message}")
+                }
+            }
         }
     }
 
+    // Синхронизация при изменении прогресса
     LaunchedEffect(userProgress) {
         userProgress?.let { updateStatsFromProgress(it) }
     }
@@ -441,7 +446,7 @@ fun DashboardScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.statusBars) // отступ от статус-бара
+                    .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(16.dp),
                 contentAlignment = Alignment.TopEnd
             ) {
@@ -467,7 +472,7 @@ fun DashboardScreen(
                 }
             }
 
-            // Вертикальная навигация (3 круглые кнопки) - показываем только если флаг true
+            // Вертикальная навигация (3 круглые кнопки)
             if (showNavigationButtons) {
                 Column(
                     modifier = Modifier

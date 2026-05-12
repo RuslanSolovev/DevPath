@@ -1,198 +1,74 @@
 package com.example.devpath.data.repository
 
+import android.util.Log
 import com.example.devpath.data.local.AppDatabase
 import com.example.devpath.data.local.entity.TestAttemptEntity
 import com.example.devpath.data.local.entity.toDomain
 import com.example.devpath.data.local.entity.toEntity
-import com.example.devpath.domain.models.GeneralTestResult // ← ДОБАВЛЕН ИМПОРТ
+import com.example.devpath.domain.models.GeneralTestResult
 import com.example.devpath.domain.models.QuizQuestion
 import com.example.devpath.domain.models.UserProgress
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class ProgressRepository @Inject constructor(
-    private val db: FirebaseFirestore,
     private val localDb: AppDatabase
 ) {
-    // Флаг для отключения Firebase (поставьте false для тестирования в авиарежиме)
-    private val useFirebase = true
 
-    // Для фоновой синхронизации
-    private val syncScope = CoroutineScope(Dispatchers.IO)
+    // ==================== СОХРАНЕНИЕ ====================
 
     suspend fun saveProgress(progress: UserProgress) {
-        try {
-            // 🔄 Сохраняем в Firebase асинхронно в фоне
-            if (useFirebase) {
-                syncScope.launch {
-                    try {
-                        db.collection("users")
-                            .document(progress.userId)
-                            .set(progress)
-                            .await()
-                        println("DEBUG: Прогресс сохранен в Firestore для ${progress.userId}")
-                    } catch (e: Exception) {
-                        println("DEBUG: Ошибка сохранения в Firebase: ${e.message}")
-                        // Игнорируем ошибки Firebase, главное - локальное сохранение
-                    }
-                }
-            }
-
-            // 🚀 Сначала мгновенно сохраняем локально
-            localDb.userProgressDao().insertProgress(progress.toEntity())
-            println("DEBUG: Прогресс сохранен локально для ${progress.userId}")
-
-        } catch (e: Exception) {
-            println("DEBUG: Ошибка сохранения прогресса: ${e.message}")
-            // Всегда пытаемся сохранить локально
+        withContext(Dispatchers.IO) {
             try {
-                localDb.userProgressDao().insertProgress(progress.toEntity())
-                println("DEBUG: Прогресс сохранен только локально")
-            } catch (localError: Exception) {
-                println("DEBUG: Ошибка локального сохранения: ${localError.message}")
+                val entity = progress.toEntity()
+                localDb.userProgressDao().insertProgress(entity)
+                println("DEBUG: ✅ Прогресс сохранён локально: userId=${progress.userId}, XP=${progress.totalXP}, уроков=${progress.completedLessons.size}")
+            } catch (e: Exception) {
+                println("DEBUG: ❌ Ошибка сохранения прогресса: ${e.message}")
+                e.printStackTrace()
             }
         }
     }
 
-    // 🚀 БЫСТРАЯ ЗАГРУЗКА: сначала локальные данные, потом синхронизация в фоне
+    // ==================== ЗАГРУЗКА ====================
+
     suspend fun loadProgress(userId: String): UserProgress? = withContext(Dispatchers.IO) {
         try {
-            // 1. 🚀 МГНОВЕННО: загружаем локальные данные
             val localProgress = localDb.userProgressDao().getProgress(userId)
-
-            // 2. 🔄 В ФОНЕ: запускаем синхронизацию с Firebase
-            syncScope.launch {
-                syncWithFirebase(userId)
-            }
-
-            // 3. Возвращаем локальные данные (если есть)
             if (localProgress != null) {
-                println("DEBUG: Используем локальный прогресс для $userId")
+                println("DEBUG: 📂 Загружен локальный прогресс для $userId")
                 return@withContext localProgress.toDomain()
             }
 
-            // 4. Если нет локальных данных, пробуем Firebase
-            if (useFirebase) {
-                try {
-                    val document = db.collection("users").document(userId).get().await()
-                    if (document.exists()) {
-                        val progress = document.toObject(UserProgress::class.java)
-                        if (progress != null) {
-                            // Сохраняем локальную копию
-                            localDb.userProgressDao().insertProgress(progress.toEntity())
-                            println("DEBUG: Загружен прогресс из Firestore для $userId")
-                            return@withContext progress
-                        }
-                    }
-                } catch (e: Exception) {
-                    println("DEBUG: Ошибка загрузки из Firebase: ${e.message}")
-                }
-            }
-
-            // 5. Создаем новый прогресс
-            println("DEBUG: Прогресс не найден, создаем новый")
+            // Создаём новый прогресс
+            println("DEBUG: 🆕 Прогресс не найден, создаём новый для $userId")
             val initialProgress = UserProgress.createEmpty(userId)
             saveProgress(initialProgress)
             initialProgress
-
         } catch (e: Exception) {
-            println("DEBUG: Ошибка загрузки прогресса: ${e.message}")
-            // В случае ошибки возвращаем локальные данные
-            val localProgress = localDb.userProgressDao().getProgress(userId)
-            return@withContext localProgress?.toDomain()
+            println("DEBUG: ❌ Ошибка загрузки прогресса: ${e.message}")
+            UserProgress.createEmpty(userId)
         }
     }
 
-    // В ProgressRepository
-    suspend fun saveTestAttempt(
-        userId: String,
-        questions: List<QuizQuestion>,
-        userAnswers: Map<Int, Int>
-    ): Long {
-        val details = buildTestAttemptDetails(questions, userAnswers)
-        val attempt = TestAttemptEntity(
-            userId = userId,
-            timestamp = System.currentTimeMillis(),
-            totalQuestions = questions.size,
-            correctAnswers = userAnswers.count { (index, answer) ->
-                questions[index].correctAnswerIndex == answer
-            },
-            detailsJson = details
-        )
-        return localDb.testAttemptDao().insertAttempt(attempt)
-    }
-
-    suspend fun getTestAttempt(attemptId: Long): TestAttemptEntity? {
-        return localDb.testAttemptDao().getAttemptById(attemptId)
-    }
-
-    private fun buildTestAttemptDetails(questions: List<QuizQuestion>, userAnswers: Map<Int, Int>): String {
-        val json = StringBuilder()
-        json.append("[")
-        questions.forEachIndexed { idx, q ->
-            val userAnswer = userAnswers[idx] ?: -1 // Если ответа нет, ставим -1
-            json.append("""{"question":"${escapeJson(q.question)}","options":[${q.options.joinToString(",") { "\"${escapeJson(it)}\"" }}],"correct":${q.correctAnswerIndex},"userAnswer":$userAnswer,"explanation":"${escapeJson(q.explanation)}","topic":"${q.topic}"}""")
-            if (idx < questions.size - 1) json.append(",")
-        }
-        json.append("]")
-        return json.toString()
-    }
-
-    // В ProgressRepository.kt
-    suspend fun getLastTestAttempt(userId: String): TestAttemptEntity? {
-        return localDb.testAttemptDao().getAttemptsByUserId(userId).firstOrNull()
-    }
-
-    suspend fun getUserTestAttempts(userId: String): List<TestAttemptEntity> {
-        return localDb.testAttemptDao().getAttemptsByUserId(userId)
-    }
-
-
-    private fun escapeJson(s: String): String {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-    }
-
-    // 🔄 Синхронизация с Firebase в фоне
-    private suspend fun syncWithFirebase(userId: String) {
-        if (!useFirebase) return
-
-        try {
-            val document = db.collection("users").document(userId).get().await()
-            if (document.exists()) {
-                val firebaseProgress = document.toObject(UserProgress::class.java)
-                if (firebaseProgress != null) {
-                    // Сохраняем свежие данные из Firebase локально
-                    localDb.userProgressDao().insertProgress(firebaseProgress.toEntity())
-                    println("DEBUG: Синхронизировано с Firebase для $userId")
-                }
-            }
-        } catch (e: Exception) {
-            println("DEBUG: Ошибка синхронизации с Firebase: ${e.message}")
-        }
-    }
-
-    // 🚀 УЛЬТРА-БЫСТРАЯ ЗАГРУЗКА: только локальные данные (для мгновенного отображения UI)
     suspend fun loadLocalProgress(userId: String): UserProgress? = withContext(Dispatchers.IO) {
         try {
             localDb.userProgressDao().getProgress(userId)?.toDomain()
         } catch (e: Exception) {
-            println("DEBUG: Ошибка загрузки локального прогресса: ${e.message}")
+            println("DEBUG: ❌ Ошибка загрузки локального прогресса: ${e.message}")
             null
         }
     }
+
+    // ==================== УРОКИ ====================
 
     suspend fun markLessonCompleted(userId: String, lessonId: String): Boolean {
         return try {
             val currentProgress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
 
-            // Избегаем дубликатов
             val updatedLessons = if (lessonId !in currentProgress.completedLessons) {
                 currentProgress.completedLessons + lessonId
             } else {
@@ -205,143 +81,195 @@ class ProgressRepository @Inject constructor(
             )
 
             saveProgress(updatedProgress)
-            println("DEBUG: Урок $lessonId отмечен как пройденный для $userId")
+            println("DEBUG: 📚 Урок $lessonId пройден, XP=${updatedProgress.totalXP}")
             true
         } catch (e: Exception) {
-            println("DEBUG: Ошибка отметки урока: ${e.message}")
+            println("DEBUG: ❌ Ошибка отметки урока: ${e.message}")
             false
         }
     }
 
     suspend fun isLessonCompleted(userId: String, lessonId: String): Boolean {
         return try {
-            val progress = loadLocalProgress(userId) // Используем быструю локальную загрузку
+            val progress = loadLocalProgress(userId)
             progress?.completedLessons?.contains(lessonId) ?: false
         } catch (e: Exception) {
-            println("DEBUG: Ошибка проверки урока: ${e.message}")
             false
         }
     }
 
+    // ==================== ПРАКТИКА ====================
+
+    suspend fun markPracticeTaskCompleted(userId: String, taskId: String) {
+        try {
+            val currentProgress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
+
+            val updatedTasks = if (taskId !in currentProgress.completedPracticeTasks) {
+                currentProgress.completedPracticeTasks + taskId
+            } else {
+                currentProgress.completedPracticeTasks
+            }
+
+            val updatedProgress = currentProgress.copy(
+                completedPracticeTasks = updatedTasks,
+                totalXP = currentProgress.totalXP + 20
+            )
+            saveProgress(updatedProgress)
+            println("DEBUG: 🛠️ Задача $taskId выполнена, XP=${updatedProgress.totalXP}")
+        } catch (e: Exception) {
+            println("DEBUG: ❌ Ошибка отметки задачи: ${e.message}")
+        }
+    }
+
+    // ==================== ТЕСТЫ ====================
+
+    suspend fun saveQuizResult(userId: String, questionId: String, isCorrect: Boolean) {
+        try {
+            val currentProgress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
+            val updatedQuizResults = currentProgress.quizResults.toMutableMap()
+            updatedQuizResults[questionId] = isCorrect
+
+            val xpBonus = if (isCorrect) 5 else 0
+            val updatedProgress = currentProgress.copy(
+                quizResults = updatedQuizResults,
+                totalXP = currentProgress.totalXP + xpBonus
+            )
+            saveProgress(updatedProgress)
+        } catch (e: Exception) {
+            println("DEBUG: ❌ Ошибка сохранения результата теста: ${e.message}")
+        }
+    }
+
     suspend fun saveGeneralTestResult(userId: String, result: GeneralTestResult) {
-        val currentProgress = loadLocalProgress(userId) ?: UserProgress.createEmpty(userId)
+        try {
+            val currentProgress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
 
-        // Ограничиваем историю 10 последними результатами
-        val updatedHistory = (currentProgress.generalTestHistory + result)
-            .sortedByDescending { it.timestamp }
-            .take(10)
+            val updatedHistory = (currentProgress.generalTestHistory + result)
+                .sortedByDescending { it.timestamp }
+                .take(10)
 
-        val updatedProgress = currentProgress.copy(generalTestHistory = updatedHistory)
-        saveProgress(updatedProgress)
+            val updatedProgress = currentProgress.copy(
+                generalTestHistory = updatedHistory,
+                totalXP = currentProgress.totalXP + (result.correctAnswers * 5)
+            )
+            saveProgress(updatedProgress)
+            println("DEBUG: 📊 Общий тест сохранён: ${result.correctAnswers}/${result.totalQuestions}")
+        } catch (e: Exception) {
+            println("DEBUG: ❌ Ошибка сохранения общего теста: ${e.message}")
+        }
     }
 
     fun getBestGeneralTestResult(history: List<GeneralTestResult>): GeneralTestResult? {
         return history.maxByOrNull { it.percentage }
     }
 
-    suspend fun markPracticeTaskCompleted(userId: String, taskId: String) {
-        val currentProgress = loadLocalProgress(userId) ?: UserProgress.createEmpty(userId)
+    // ==================== ПОПЫТКИ ТЕСТОВ ====================
 
-        val updatedTasks = if (taskId !in currentProgress.completedPracticeTasks) {
-            currentProgress.completedPracticeTasks + taskId
-        } else {
-            currentProgress.completedPracticeTasks
+    suspend fun saveTestAttempt(
+        userId: String,
+        questions: List<QuizQuestion>,
+        userAnswers: Map<Int, Int>
+    ): Long {
+        val correctCount = userAnswers.count { (index, answer) ->
+            questions.getOrNull(index)?.correctAnswerIndex == answer
         }
 
-        val updatedProgress = currentProgress.copy(
-            completedPracticeTasks = updatedTasks,
-            totalXP = currentProgress.totalXP + 20
+        val details = buildTestAttemptDetails(questions, userAnswers)
+        val attempt = TestAttemptEntity(
+            userId = userId,
+            timestamp = System.currentTimeMillis(),
+            totalQuestions = questions.size,
+            correctAnswers = correctCount,
+            detailsJson = details
         )
-        saveProgress(updatedProgress)
+        val id = localDb.testAttemptDao().insertAttempt(attempt)
+        println("DEBUG: 📝 Попытка теста сохранена: id=$id, правильно=$correctCount/${questions.size}")
+        return id
     }
 
-    suspend fun saveQuizResult(userId: String, questionId: String, isCorrect: Boolean) {
-        val currentProgress = loadLocalProgress(userId) ?: UserProgress.createEmpty(userId)
-        val updatedQuizResults = currentProgress.quizResults.toMutableMap()
-        updatedQuizResults[questionId] = isCorrect
-
-        val xpBonus = if (isCorrect) 5 else 0
-        val updatedProgress = currentProgress.copy(
-            quizResults = updatedQuizResults,
-            totalXP = currentProgress.totalXP + xpBonus
-        )
-        saveProgress(updatedProgress)
+    suspend fun getTestAttempt(attemptId: Long): TestAttemptEntity? {
+        return localDb.testAttemptDao().getAttemptById(attemptId)
     }
+
+    suspend fun getLastTestAttempt(userId: String): TestAttemptEntity? {
+        return localDb.testAttemptDao().getAttemptsByUserId(userId).firstOrNull()
+    }
+
+    suspend fun getUserTestAttempts(userId: String): List<TestAttemptEntity> {
+        return localDb.testAttemptDao().getAttemptsByUserId(userId)
+    }
+
+    private fun buildTestAttemptDetails(questions: List<QuizQuestion>, userAnswers: Map<Int, Int>): String {
+        val sb = StringBuilder("[")
+        questions.forEachIndexed { idx, q ->
+            val userAnswer = userAnswers[idx] ?: -1
+            sb.append("""{"question":"${escapeJson(q.question)}","options":[${q.options.joinToString(",") { "\"${escapeJson(it)}\"" }}],"correct":${q.correctAnswerIndex},"userAnswer":$userAnswer,"explanation":"${escapeJson(q.explanation)}","topic":"${q.topic}"}""")
+            if (idx < questions.size - 1) sb.append(",")
+        }
+        sb.append("]")
+        return sb.toString()
+    }
+
+    private fun escapeJson(s: String): String {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    }
+
+    // ==================== ИЗБРАННОЕ ====================
 
     suspend fun toggleFavoriteInterviewQuestion(userId: String, questionId: String, isFavorite: Boolean) {
-        val currentProgress = loadLocalProgress(userId) ?: UserProgress.createEmpty(userId)
-        val currentFavorites = currentProgress.favoriteInterviewQuestions.toMutableList()
+        try {
+            android.util.Log.d("ENTITY_DEBUG", "toggleFavorite: userId=$userId, question=$questionId, isFavorite=$isFavorite")
 
-        if (isFavorite) {
-            if (questionId !in currentFavorites) {
-                currentFavorites.add(questionId)
+            val currentProgress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
+            android.util.Log.d("ENTITY_DEBUG", "toggleFavorite: текущий список избранного = ${currentProgress.favoriteInterviewQuestions}")
+
+            val currentFavorites = currentProgress.favoriteInterviewQuestions.toMutableList()
+
+            if (isFavorite) {
+                if (questionId !in currentFavorites) {
+                    currentFavorites.add(questionId)
+                    android.util.Log.d("ENTITY_DEBUG", "toggleFavorite: + добавлен $questionId")
+                }
+            } else {
+                currentFavorites.remove(questionId)
+                android.util.Log.d("ENTITY_DEBUG", "toggleFavorite: - удален $questionId")
             }
-        } else {
-            currentFavorites.remove(questionId)
-        }
 
-        val updatedProgress = currentProgress.copy(
-            favoriteInterviewQuestions = currentFavorites
-        )
-        saveProgress(updatedProgress)
-    }
+            val updatedProgress = currentProgress.copy(
+                favoriteInterviewQuestions = currentFavorites
+            )
 
-    // Трекинг ежедневной активности (полностью офлайн)
-    suspend fun trackDailyActivity(userId: String) {
-        val progress = loadLocalProgress(userId) ?: UserProgress.createEmpty(userId)
-        val today = getTodayDateString()
-
-        // Проверяем стрик
-        val newStreak = if (progress.lastActivityDate == today) {
-            progress.dailyStreak // Сегодня уже был активен
-        } else if (progress.lastActivityDate == getYesterdayDateString()) {
-            progress.dailyStreak + 1 // Продолжаем стрик
-        } else {
-            1 // Новый стрик
-        }
-
-        // Обновляем прогресс
-        val updatedProgress = progress.copy(
-            dailyStreak = newStreak,
-            lastActivityDate = today
-        )
-
-        // Сохраняем мгновенно локально
-        localDb.userProgressDao().insertProgress(updatedProgress.toEntity())
-
-        // В фоне синхронизируем с Firebase
-        if (useFirebase) {
-            syncScope.launch {
-                db.collection("users").document(userId).set(updatedProgress).await()
-            }
+            android.util.Log.d("ENTITY_DEBUG", "toggleFavorite: сохраняем список = ${updatedProgress.favoriteInterviewQuestions}")
+            saveProgress(updatedProgress)
+            android.util.Log.d("ENTITY_DEBUG", "toggleFavorite: ✅ сохранено успешно")
+        } catch (e: Exception) {
+            android.util.Log.e("ENTITY_DEBUG", "❌ Ошибка избранного: ${e.message}", e)
         }
     }
 
-    // Проверка и разблокировка достижений (офлайн)
+    // ==================== ДОСТИЖЕНИЯ ====================
+
     suspend fun checkAndUnlockAchievements(userId: String): Set<String> {
-        val progress = loadLocalProgress(userId) ?: return emptySet()
+        val progress = loadProgress(userId) ?: return emptySet()
         val unlocked = progress.achievementsUnlocked.toMutableSet()
+        var changed = false
 
-        // Достижение "Первый шаг" — завершил первый урок
         if (progress.completedLessons.isNotEmpty() && !unlocked.contains("first_step")) {
             unlocked.add("first_step")
-            awardXP(userId, 50)
+            changed = true
         }
 
-        // Достижение "Стрик 3 дня" — 3 дня подряд
         if (progress.dailyStreak >= 3 && !unlocked.contains("streak_3")) {
             unlocked.add("streak_3")
-            awardXP(userId, 100)
+            changed = true
         }
 
-        // Достижение "Практик" — 5 решённых задач
         if (progress.completedPracticeTasks.size >= 5 && !unlocked.contains("practicer")) {
             unlocked.add("practicer")
-            awardXP(userId, 150)
+            changed = true
         }
 
-        // Сохраняем обновлённые достижения
-        if (unlocked.size > progress.achievementsUnlocked.size) {
+        if (changed) {
             val updatedProgress = progress.copy(achievementsUnlocked = unlocked)
             saveProgress(updatedProgress)
         }
@@ -349,30 +277,27 @@ class ProgressRepository @Inject constructor(
         return unlocked
     }
 
-    // Награда за достижение (офлайн)
-    private suspend fun awardXP(userId: String, amount: Int) {
-        val progress = loadLocalProgress(userId) ?: return
+    // ==================== ЕЖЕДНЕВНАЯ АКТИВНОСТЬ ====================
+
+    suspend fun trackDailyActivity(userId: String) {
+        val progress = loadProgress(userId) ?: UserProgress.createEmpty(userId)
+        val today = getTodayDateString()
+
+        val newStreak = when {
+            progress.lastActivityDate == today -> progress.dailyStreak
+            progress.lastActivityDate == getYesterdayDateString() -> progress.dailyStreak + 1
+            else -> 1
+        }
+
         val updatedProgress = progress.copy(
-            totalXP = progress.totalXP + amount,
-            level = calculateLevel(progress.totalXP + amount)
+            dailyStreak = newStreak,
+            lastActivityDate = today
         )
         saveProgress(updatedProgress)
     }
 
-    // Вспомогательные функции дат
-    private fun getTodayDateString(): String {
-        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-            .format(java.util.Date())
-    }
+    // ==================== ВСПОМОГАТЕЛЬНОЕ ====================
 
-    private fun getYesterdayDateString(): String {
-        val calendar = java.util.Calendar.getInstance()
-        calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
-        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-            .format(calendar.time)
-    }
-
-    // Функция расчёта уровня по XP
     private fun calculateLevel(totalXP: Int): Int {
         if (totalXP < 100) return 1
         if (totalXP < 250) return 2
@@ -388,5 +313,17 @@ class ProgressRepository @Inject constructor(
             xpForNextLevel += 50
         }
         return level
+    }
+
+    private fun getTodayDateString(): String {
+        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date())
+    }
+
+    private fun getYesterdayDateString(): String {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(calendar.time)
     }
 }

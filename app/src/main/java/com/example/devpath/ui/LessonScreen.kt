@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 // Импортируем ваши компоненты
 import com.example.devpath.ui.CodeBlock
 import com.example.devpath.ui.FormattedLessonContent
+import com.example.devpath.utils.SessionManager
 
 @OptIn(
     ExperimentalMaterial3Api::class,
@@ -65,7 +66,9 @@ fun LessonScreen(
     val coroutineScope = rememberCoroutineScope()
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
-    val currentUser = Firebase.auth.currentUser
+    val currentUser = object {
+        val uid = SessionManager.getUserId() ?: "test_user_123"
+    }
     val listState = rememberLazyListState()
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -1011,6 +1014,7 @@ fun CommonPitfalls(modifier: Modifier = Modifier) {
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                 Spacer(modifier = Modifier.width(8.dp))

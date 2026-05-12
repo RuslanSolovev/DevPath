@@ -1,13 +1,20 @@
 package com.example.devpath.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
@@ -30,6 +37,7 @@ import com.example.devpath.ui.viewmodel.ProgressViewModel
 import com.example.devpath.domain.models.GeneralTestResult
 import androidx.navigation.compose.navigation
 import com.example.devpath.data.repository.YdbRepository
+import com.example.devpath.utils.SessionManager
 import com.google.firebase.auth.FirebaseAuth
 
 @Composable
@@ -38,8 +46,8 @@ fun DevPathNavGraph(
     onNavigationVisibilityChanged: (Boolean) -> Unit = {}
 ) {
 
-    val currentUser = Firebase.auth.currentUser
-    val startDestination = if (currentUser != null) "dashboard" else "auth"
+    val isLoggedIn = SessionManager.isLoggedIn()
+    val startDestination = if (isLoggedIn) "dashboard" else "auth"
 
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
@@ -51,9 +59,10 @@ fun DevPathNavGraph(
     var showNavButtons by remember { mutableStateOf(true) }
 
     // Синхронизация избранного при запуске
-    LaunchedEffect(currentUser) {
-        if (currentUser != null) {
-            val progress = progressRepo.loadProgress(currentUser.uid)
+    LaunchedEffect(Unit) {
+        val userId = SessionManager.getUserId()
+        if (userId != null) {
+            val progress = progressRepo.loadProgress(userId)
             progress?.favoriteInterviewQuestions?.let { favoriteIds ->
                 FavoritesRepository.syncWithRemote(favoriteIds)
             }
@@ -357,21 +366,8 @@ fun GeneralTestScreenContent(
     navController: NavHostController,
     onBackToDashboard: () -> Unit
 ) {
-    // Состояние для хранения ID пользователя
-    var currentUserId by remember { mutableStateOf<String?>(null) }
-    val auth = Firebase.auth
-
-    // Подписываемся на изменения аутентификации
-    DisposableEffect(Unit) {
-        currentUserId = auth.currentUser?.uid
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUserId = auth.currentUser?.uid
-        }
-        auth.addAuthStateListener(listener)
-        onDispose {
-            auth.removeAuthStateListener(listener)
-        }
-    }
+    val context = LocalContext.current
+    val currentUserId = remember { SessionManager.getUserId() }
 
     val allQuestions = QuizRepository.getQuizQuestions()
     val randomQuestions = remember(allQuestions) {
@@ -389,10 +385,26 @@ fun GeneralTestScreenContent(
         }
     }
 
-    // Если пользователь ещё не загружен – показываем индикатор
+    // Если пользователь не авторизован – показываем индикатор или сообщение
     if (currentUserId == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                CircularProgressIndicator()
+                Text(
+                    "Пожалуйста, войдите в аккаунт",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(onClick = { onBackToDashboard() }) {
+                    Text("Вернуться на главную")
+                }
+            }
         }
         return
     }
@@ -410,26 +422,35 @@ fun GeneralTestScreenContent(
         questions = randomQuestions,
         onTestComplete = { quizResult, userAnswers ->
             coroutineScope.launch {
-                // Сохраняем детальную попытку
-                val id = testViewModel.progressRepository.saveTestAttempt(
-                    currentUserId!!,
-                    randomQuestions,
-                    userAnswers
-                )
-                attemptId = id
-
-                // Сохраняем результат в историю с attemptId
-                val testResult = GeneralTestResult(
-                    correctAnswers = quizResult.correctAnswers,
-                    totalQuestions = quizResult.totalQuestions,
-                    percentage = if (quizResult.totalQuestions > 0)
-                        (quizResult.correctAnswers * 100 / quizResult.totalQuestions)
-                    else 0,
+                try {
+                    // Сохраняем детальную попытку
+                    val id = testViewModel.progressRepository.saveTestAttempt(
+                        currentUserId,
+                        randomQuestions,
+                        userAnswers
+                    )
                     attemptId = id
-                )
-                testViewModel.progressRepository.saveGeneralTestResult(currentUserId!!, testResult)
 
-                shouldNavigateToResults = true
+                    // Сохраняем результат в историю с attemptId
+                    val testResult = GeneralTestResult(
+                        correctAnswers = quizResult.correctAnswers,
+                        totalQuestions = quizResult.totalQuestions,
+                        percentage = if (quizResult.totalQuestions > 0)
+                            (quizResult.correctAnswers * 100 / quizResult.totalQuestions)
+                        else 0,
+                        attemptId = id
+                    )
+                    testViewModel.progressRepository.saveGeneralTestResult(
+                        currentUserId,
+                        testResult
+                    )
+
+                    Log.d("GeneralTest", "✅ Тест сохранён: ${quizResult.correctAnswers}/${quizResult.totalQuestions}")
+                    shouldNavigateToResults = true
+                } catch (e: Exception) {
+                    Log.e("GeneralTest", "❌ Ошибка сохранения теста: ${e.message}", e)
+                    // Можно показать ошибку пользователю
+                }
             }
         },
         onBack = {

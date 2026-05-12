@@ -34,9 +34,11 @@ import com.google.firebase.ktx.Firebase
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.example.devpath.ui.viewmodel.ProgressViewModel
+import com.example.devpath.utils.SessionManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +46,9 @@ fun QuizScreen(
     parentNavController: NavHostController? = null,
     onNavigateBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val userId = remember { SessionManager.getUserId() }
+
     // Добавляем BackHandler для этого экрана
     BackHandler {
         println("DEBUG: QuizScreen BackHandler")
@@ -51,7 +56,6 @@ fun QuizScreen(
     }
 
     val allQuestions = QuizRepository.getQuizQuestions()
-    val currentUser = Firebase.auth.currentUser
 
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
@@ -66,11 +70,11 @@ fun QuizScreen(
     // Ключ для обновления данных
     var refreshKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(currentUser, refreshKey) {
-        if (currentUser != null) {
+    LaunchedEffect(userId, refreshKey) {
+        if (userId != null) {
             isLoading = true
             try {
-                val progress = progressRepo.loadProgress(currentUser.uid)
+                val progress = progressRepo.loadProgress(userId)
                 val history = progress?.generalTestHistory ?: emptyList()
                 testHistory = history.sortedByDescending { it.timestamp }
                 bestResult = getBestGeneralTestResult(history)

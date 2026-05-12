@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,15 +35,13 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.devpath.data.repository.FavoritesRepository
 import com.example.devpath.data.repository.InterviewRepository
-import com.example.devpath.data.repository.ProgressRepository
 import com.example.devpath.domain.models.InterviewQuestion
-import com.google.firebase.auth.ktx.auth
-import com.google.firebase.ktx.Firebase
+import com.example.devpath.utils.SessionManager
 import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.launch
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.devpath.ui.viewmodel.ProgressViewModel
+import android.util.Log
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,7 +51,7 @@ fun InterviewScreen(
 ) {
     // Добавляем BackHandler для этого экрана
     BackHandler {
-        println("DEBUG: PracticeScreen BackHandler")
+        println("DEBUG: InterviewScreen BackHandler")
         onNavigateBack()
     }
 
@@ -89,7 +88,7 @@ fun InterviewQuestionDetailScreen(
     val question = InterviewRepository.getQuestionById(questionId)
         ?: InterviewRepository.getInterviewQuestions().first()
 
-    val currentUser = Firebase.auth.currentUser
+    val userId = remember { SessionManager.getUserId() }
     val coroutineScope = rememberCoroutineScope()
 
     val viewModel: ProgressViewModel = hiltViewModel()
@@ -99,18 +98,21 @@ fun InterviewQuestionDetailScreen(
         question = question,
         onBack = { childNavController.popBackStack() },
         onToggleFavorite = { id ->
-            if (currentUser != null) {
-                val isNowFavorite = !FavoritesRepository.isFavorite(id)
-                FavoritesRepository.toggleFavorite(id)
+            val isNowFavorite = !FavoritesRepository.isFavorite(id)
+            FavoritesRepository.toggleFavorite(id)
+            if (userId != null) {
                 coroutineScope.launch {
-                    progressRepo.toggleFavoriteInterviewQuestion(
-                        currentUser.uid,
-                        id,
-                        isNowFavorite
-                    )
+                    try {
+                        progressRepo.toggleFavoriteInterviewQuestion(
+                            userId,
+                            id,
+                            isNowFavorite
+                        )
+                        Log.d("Interview", "✅ Избранное обновлено: question=$id, favorite=$isNowFavorite")
+                    } catch (e: Exception) {
+                        Log.e("Interview", "❌ Ошибка сохранения избранного: ${e.message}")
+                    }
                 }
-            } else {
-                FavoritesRepository.toggleFavorite(id)
             }
         }
     )
@@ -128,34 +130,59 @@ fun InterviewQuestionListScreen(
             FavoritesRepository.getFavoriteQuestions(allQuestions)
         }
     }
-    val currentUser = Firebase.auth.currentUser
+    val userId = remember { SessionManager.getUserId() }
     val coroutineScope = rememberCoroutineScope()
 
     val viewModel: ProgressViewModel = hiltViewModel()
     val progressRepo = viewModel.progressRepository
+
+    // 🔥 ЗАГРУЗКА ИЗБРАННОГО ПРИ ВХОДЕ НА ЭКРАН
+    LaunchedEffect(userId) {
+        if (userId != null) {
+            try {
+                val progress = progressRepo.loadProgress(userId)
+                val favoritesFromDb = progress?.favoriteInterviewQuestions ?: emptyList()
+
+                Log.d("Favorites", "📥 Загрузка избранного из БД:")
+                Log.d("Favorites", "📥 userId: $userId")
+                Log.d("Favorites", "📥 progress != null: ${progress != null}")
+                Log.d("Favorites", "📥 favoriteInterviewQuestions: $favoritesFromDb")
+                Log.d("Favorites", "📥 Размер списка: ${favoritesFromDb.size}")
+
+                if (favoritesFromDb.isNotEmpty()) {
+                    FavoritesRepository.syncWithRemote(favoritesFromDb)
+                    Log.d("Favorites", "✅ FavoritesRepository обновлен: ${FavoritesRepository.favoriteQuestionIds.value}")
+                } else {
+                    Log.w("Favorites", "⚠️ Список избранного в БД пустой")
+                }
+            } catch (e: Exception) {
+                Log.e("Favorites", "❌ Ошибка загрузки избранного: ${e.message}", e)
+            }
+        } else {
+            Log.w("Favorites", "❌ userId is null, избранное не загружено")
+        }
+    }
 
     var selectedTab by remember { mutableStateOf(InterviewTab.ALL) }
     val questionsToShow = remember(selectedTab) {
         if (selectedTab == InterviewTab.ALL) allQuestions else favoriteQuestions
     }
 
-    // ✅ ПРОСТОЙ STATE ДЛЯ СКРОЛЛА
+    // STATE ДЛЯ СКРОЛЛА
     val listState = rememberLazyListState()
 
-    // ✅ ПРЯМОЙ РАСЧЁТ ВЫСОТЫ HEADER
+    // ПРЯМОЙ РАСЧЁТ ВЫСОТЫ HEADER
     val headerHeight by remember(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         derivedStateOf {
             if (listState.firstVisibleItemIndex == 0) {
-                // Полная высота когда первый элемент виден
                 (260 - listState.firstVisibleItemScrollOffset).coerceAtLeast(0)
             } else {
-                // Полностью скрыт когда скроллим дальше
                 0
             }
         }
     }
 
-    // ✅ ПРОСТАЯ АЛЬФА ДЛЯ ПЛАВНОГО ИСЧЕЗНОВЕНИЯ
+    // ПРОСТАЯ АЛЬФА ДЛЯ ПЛАВНОГО ИСЧЕЗНОВЕНИЯ
     val alpha by remember(headerHeight) {
         derivedStateOf {
             (headerHeight / 260f).coerceIn(0f, 1f)
@@ -174,7 +201,7 @@ fun InterviewQuestionListScreen(
         ) {
             item {
                 Column {
-                    // ✅ ПРОСТОЙ COLLAPSING HEADER
+                    // COLLAPSING HEADER
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -442,18 +469,23 @@ fun InterviewQuestionListScreen(
                             childNavController.navigate("question/$questionId")
                         },
                         onToggleFavorite = { questionId ->
-                            if (currentUser != null) {
-                                val isNowFavorite = !FavoritesRepository.isFavorite(questionId)
-                                FavoritesRepository.toggleFavorite(questionId)
+                            val isNowFavorite = !FavoritesRepository.isFavorite(questionId)
+                            FavoritesRepository.toggleFavorite(questionId)
+
+                            val uid = SessionManager.getUserId()
+                            if (uid != null) {
                                 coroutineScope.launch {
-                                    progressRepo.toggleFavoriteInterviewQuestion(
-                                        currentUser.uid,
-                                        questionId,
-                                        isNowFavorite
-                                    )
+                                    try {
+                                        progressRepo.toggleFavoriteInterviewQuestion(uid, questionId, isNowFavorite)
+                                        Log.d("Favorites", "✅ Сохранено в БД: question=$questionId, favorite=$isNowFavorite")
+                                    } catch (e: Exception) {
+                                        Log.e("Favorites", "❌ Ошибка сохранения: ${e.message}")
+                                        // Откатываем локальное изменение при ошибке
+                                        FavoritesRepository.toggleFavorite(questionId)
+                                    }
                                 }
                             } else {
-                                FavoritesRepository.toggleFavorite(questionId)
+                                Log.w("Favorites", "⚠️ userId is null, избранное не сохранено в БД")
                             }
                         }
                     )
@@ -646,10 +678,10 @@ private fun EmptyState(
 @Composable
 fun getCategoryColor(category: String): Color {
     return when (category.lowercase()) {
-        "kotlin" -> Color(0xFF7C3AED) // Фиолетовый
-        "android" -> Color(0xFF3B82F6) // Синий
-        "algorithms" -> Color(0xFF8B5CF6) // Индиго
-        "general" -> Color(0xFF059669) // Изумрудный
+        "kotlin" -> Color(0xFF7C3AED)
+        "android" -> Color(0xFF3B82F6)
+        "algorithms" -> Color(0xFF8B5CF6)
+        "general" -> Color(0xFF059669)
         else -> MaterialTheme.colorScheme.primary
     }
 }
@@ -657,9 +689,9 @@ fun getCategoryColor(category: String): Color {
 @Composable
 fun getDifficultyColor(difficulty: String): Color {
     return when (difficulty.lowercase()) {
-        "beginner" -> Color(0xFF10B981) // Зеленый
-        "intermediate" -> Color(0xFFF59E0B) // Оранжевый
-        "advanced" -> Color(0xFFEF4444) // Красный
+        "beginner" -> Color(0xFF10B981)
+        "intermediate" -> Color(0xFFF59E0B)
+        "advanced" -> Color(0xFFEF4444)
         else -> MaterialTheme.colorScheme.primary
     }
 }
