@@ -11,6 +11,10 @@ import android.location.Geocoder
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -726,18 +730,20 @@ fun MarkerDetailDialog(
                     }
                 }
 
-                // Кнопка жалобы (всегда снизу)
-                TextButton(
-                    onClick = onReport,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-                    )
-                ) {
-                    Icon(Icons.Outlined.Flag, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Пожаловаться")
-                }
+                /*
+ // Кнопка жалобы (всегда снизу)
+ TextButton(
+     onClick = onReport,
+     modifier = Modifier.fillMaxWidth(),
+     colors = ButtonDefaults.textButtonColors(
+         contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+     )
+ ) {
+     Icon(Icons.Outlined.Flag, null, Modifier.size(16.dp))
+     Spacer(Modifier.width(4.dp))
+     Text("Пожаловаться")
+ }
+ */
             }
         },
         dismissButton = null,
@@ -1087,13 +1093,13 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
     val currentUserId = prefs.getString("user_id", "") ?: ""
     val currentUserName = prefs.getString("user_name", "Пользователь") ?: "Пользователь"
 
-    // Получаем YdbRepository через hiltViewModel или другим способом
     val ydbRepository = remember { com.example.devpath.data.repository.YdbRepository() }
 
     val iconFactory = remember { MarkerIconFactory(context) }
     val markerManager = remember { mutableStateOf<MarkerManager?>(null) }
     var isMapReady by remember { mutableStateOf(false) }
     var isMapLoading by remember { mutableStateOf(true) }
+    var cameraSetForCurrentLocation by remember { mutableStateOf(false) }
 
     fun updateCameraAddress(latitude: Double, longitude: Double) {
         geocodeJob?.cancel()
@@ -1126,26 +1132,6 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
         }
     }
 
-    LaunchedEffect(isMapReady) {
-        if (!isMapReady) return@LaunchedEffect
-        while (true) {
-            delay(30_000)
-            currentLocation?.let { loc ->
-                viewModel.loadNearbyMarkers(currentUserId, loc.latitude, loc.longitude)
-            }
-        }
-    }
-
-    LaunchedEffect(currentLocation, isMapReady) {
-        if (isMapReady && currentLocation != null) {
-            delay(500)
-            markerManager.value?.setInitialCamera(
-                currentLocation!!.latitude,
-                currentLocation!!.longitude
-            )
-        }
-    }
-
     val inputListener = remember {
         object : InputListener {
             override fun onMapTap(map: Map, point: Point) {
@@ -1175,17 +1161,13 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
         }
     }
 
+    // Инициализация карты
     LaunchedEffect(mapView) {
         mapView.apply {
             map.isRotateGesturesEnabled = true
             map.isScrollGesturesEnabled = true
             map.isTiltGesturesEnabled = true
             map.isZoomGesturesEnabled = true
-            map.move(
-                CameraPosition(Point(55.751574, 37.573856), 10.0f, 0.0f, 0.0f),
-                Animation(Animation.Type.SMOOTH, 0.5f),
-                null
-            )
             map.addCameraListener(cameraListener)
             map.addInputListener(inputListener)
         }
@@ -1204,14 +1186,55 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
             }
         )
 
-        markerManager.value?.setInitialCamera(
-            currentLocation?.latitude ?: 55.751574,
-            currentLocation?.longitude ?: 37.573856
-        )
-        isMapReady = true
-        isMapLoading = false
+        // ЖДЁМ ЛОКАЦИЮ перед тем как показать карту
+        // Если локация уже есть — сразу готово
+        // Если нет — ждём через snapshotFlow
+        if (currentLocation != null) {
+            val loc = currentLocation!!
+            mapView.map.move(
+                CameraPosition(Point(loc.latitude, loc.longitude), 16.0f, 0.0f, 0.0f),
+                Animation(Animation.Type.SMOOTH, 1.0f),
+                null
+            )
+            markerManager.value?.setInitialCamera(loc.latitude, loc.longitude)
+            updateCameraAddress(loc.latitude, loc.longitude)
+            cameraSetForCurrentLocation = true
+            isMapReady = true
+            isMapLoading = false
+        } else {
+            // Ждём локацию, карта показывает загрузку
+            snapshotFlow { currentLocation }
+                .first { it != null }
+                .let { loc ->
+                    if (loc != null) {
+                        delay(300)
+                        mapView.map.move(
+                            CameraPosition(Point(loc.latitude, loc.longitude), 16.0f, 0.0f, 0.0f),
+                            Animation(Animation.Type.SMOOTH, 1.0f),
+                            null
+                        )
+                        markerManager.value?.setInitialCamera(loc.latitude, loc.longitude)
+                        updateCameraAddress(loc.latitude, loc.longitude)
+                        cameraSetForCurrentLocation = true
+                    }
+                }
+            isMapReady = true
+            isMapLoading = false
+        }
     }
 
+    // Периодическая подгрузка маркеров (каждые 30 секунд)
+    LaunchedEffect(isMapReady) {
+        if (!isMapReady) return@LaunchedEffect
+        while (true) {
+            delay(30_000)
+            currentLocation?.let { loc ->
+                viewModel.loadNearbyMarkers(currentUserId, loc.latitude, loc.longitude)
+            }
+        }
+    }
+
+    // Обновление маркеров на карте
     LaunchedEffect(isMapReady) {
         if (!isMapReady || markerManager.value == null) return@LaunchedEffect
         snapshotFlow { Triple(nearbyUsers, nearbyMarkers, currentLocation) }
@@ -1287,19 +1310,18 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Outlined.Map, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Outlined.MyLocation, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Загрузка карты", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-                                Text("Поиск пользователей и событий...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                                Text("Определяем местоположение", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
+                                Text("Пожалуйста, подождите...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                             }
                             LinearProgressIndicator(
                                 Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                                 color = MaterialTheme.colorScheme.primary,
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant
                             )
-                            Text("Пожалуйста, подождите", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -1528,26 +1550,6 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                                 selectedEventMarker = null
                             }
                         }
-                    )
-                }
-
-                // Диалог репорта
-                if (showMarkerReportDialog && selectedEventMarker != null) {
-                    AlertDialog(
-                        onDismissRequest = { showMarkerReportDialog = false },
-                        title = { Text("Пожаловаться") },
-                        text = { Text("Вы уверены, что хотите пожаловаться на эту метку?") },
-                        confirmButton = {
-                            Button(onClick = {
-                                coroutineScope.launch {
-                                    viewModel.reportMarker(selectedEventMarker!!.id, "Жалоба")
-                                    Toast.makeText(context, "Жалоба отправлена", Toast.LENGTH_SHORT).show()
-                                }
-                                showMarkerReportDialog = false
-                                selectedEventMarker = null
-                            }) { Text("Отправить") }
-                        },
-                        dismissButton = { TextButton(onClick = { showMarkerReportDialog = false }) { Text("Отмена") } }
                     )
                 }
 

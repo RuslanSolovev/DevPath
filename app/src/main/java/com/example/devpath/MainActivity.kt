@@ -2,9 +2,13 @@ package com.example.devpath
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
@@ -38,8 +42,6 @@ class MainActivity : ComponentActivity() {
     lateinit var ydbRepository: YdbRepository
 
     private lateinit var insetsController: WindowInsetsControllerCompat
-
-    // ✅ MapView создаётся здесь и живёт всю жизнь Activity
     private lateinit var mapView: MapView
 
     private val requestMultiplePermissionsLauncher = registerForActivityResult(
@@ -65,10 +67,8 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        // ✅ Создаём MapView один раз
         mapView = MapView(this)
 
-        // ✅ ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ YDB
         lifecycleScope.launch {
             try {
                 val usersOk = ydbRepository.initDatabase()
@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
         }
 
         checkAndRequestAllPermissions()
+        requestBatteryOptimizationIfNeeded()
 
         setContent {
             CompositionLocalProvider(LocalThemeRepository provides themeRepository) {
@@ -163,21 +164,44 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndRequestAllPermissions() {
         val permissionsToRequest = mutableListOf<String>()
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED)
                 permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
+
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P)
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
                 permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                 permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED)
+                permissionsToRequest.add(Manifest.permission.ACTIVITY_RECOGNITION)
+
         if (permissionsToRequest.isNotEmpty()) {
             if (permissionsToRequest.contains(Manifest.permission.RECORD_AUDIO) && shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO))
                 Toast.makeText(this, "Для голосового ввода необходимо разрешение на запись аудио", Toast.LENGTH_LONG).show()
+            if (permissionsToRequest.contains(Manifest.permission.ACTIVITY_RECOGNITION) && shouldShowRequestPermissionRationale(Manifest.permission.ACTIVITY_RECOGNITION))
+                Toast.makeText(this, "Для подсчёта шагов необходимо разрешение на физическую активность", Toast.LENGTH_LONG).show()
             requestMultiplePermissionsLauncher.launch(permissionsToRequest.toTypedArray())
+        }
+    }
+
+    private fun requestBatteryOptimizationIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            }
         }
     }
 }

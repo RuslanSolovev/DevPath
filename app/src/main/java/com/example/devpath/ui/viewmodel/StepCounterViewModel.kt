@@ -7,6 +7,7 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,15 +16,19 @@ import com.example.devpath.domain.models.LeaderboardEntry
 import com.example.devpath.services.StepCounterService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
@@ -67,15 +72,39 @@ class StepCounterViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // Для троттлинга сохранения шагов
+    private var lastSavedSteps = 0
+    private var lastSaveTimeMs = 0L
+    private val minSaveIntervalMs = 120_000L // 2 минуты для более частого обновления
+    private val minStepDifference = 25 // сохраняем если изменилось больше чем на 25 шагов
+
+    // ID текущего пользователя (устанавливается при загрузке)
+    private var currentUserId: String = ""
+    private var currentUserName: String = ""
+
+    // Флаг для периодического обновления
+    private var isPeriodicUpdateActive = false
+
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             stepService = (service as StepCounterService.LocalBinder).getService()
             bound = true
             viewModelScope.launch {
-                stepService?.stepCount?.collect { count -> _stepCount.value = count }
+                stepService?.stepCount?.collect { count ->
+                    _stepCount.value = count
+                }
             }
             viewModelScope.launch {
-                stepService?.todaySteps?.collect { steps -> _todaySteps.value = steps }
+                stepService?.todaySteps?.collect { steps ->
+                    _todaySteps.value = steps
+                    // При каждом изменении шагов обновляем totals в фоне
+                    if (currentUserId.isNotEmpty()) {
+                        launch {
+                            delay(2000) // Небольшая задержка чтобы не дёргать БД на каждый шаг
+                            loadTotals(currentUserId)
+                        }
+                    }
+                }
             }
             stepService?.startStepCounting()
         }
@@ -88,20 +117,42 @@ class StepCounterViewModel @Inject constructor(
 
     fun hasStepPermission(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ActivityCompat.checkSelfPermission(context, android.Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
-        } else true
+            ActivityCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACTIVITY_RECOGNITION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    fun isBatteryOptimizationDisabled(context: Context): Boolean {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return powerManager.isIgnoringBatteryOptimizations(context.packageName)
     }
 
     fun bindService(context: Context) {
         val intent = Intent(context, StepCounterService::class.java)
-        context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-        context.startService(intent)
+        try {
+            context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            println("StepCounter ERROR: bindService failed - ${e.message}")
+        }
     }
 
     fun unbindService(context: Context) {
         if (bound) {
-            context.unbindService(connection)
-            bound = false
+            try {
+                context.unbindService(connection)
+                bound = false
+            } catch (e: Exception) {
+                println("StepCounter ERROR: unbindService failed - ${e.message}")
+            }
         }
     }
 
@@ -109,9 +160,65 @@ class StepCounterViewModel @Inject constructor(
         stepService?.resetStepCount()
         _stepCount.value = 0
         _todaySteps.value = 0
+        lastSavedSteps = 0
+        lastSaveTimeMs = 0L
     }
 
-    fun saveSteps(userId: String, userName: String) {
+    /**
+     * Инициализация экрана - загружаем всё и запускаем периодическое обновление
+     */
+    fun initialize(userId: String, userName: String) {
+        currentUserId = userId
+        currentUserName = userName
+
+        loadAllLeaderboards()
+        observeWeeklyStats(userId)
+        loadTotals(userId)
+
+        // Запускаем периодическое обновление лидербордов
+        startPeriodicUpdate()
+    }
+
+    /**
+     * Периодическое обновление лидербордов каждые 30 секунд
+     */
+    private fun startPeriodicUpdate() {
+        if (isPeriodicUpdateActive) return
+        isPeriodicUpdateActive = true
+
+        viewModelScope.launch {
+            while (isActive && isPeriodicUpdateActive) {
+                delay(30_000L) // 30 секунд
+                if (currentUserId.isNotEmpty()) {
+                    println("DEBUG: Периодическое обновление лидербордов...")
+                    loadAllLeaderboards()
+                    loadTotals(currentUserId)
+                }
+            }
+        }
+    }
+
+    fun stopPeriodicUpdate() {
+        isPeriodicUpdateActive = false
+    }
+
+    fun saveStepsThrottled(userId: String, userName: String) {
+        val steps = _todaySteps.value
+        val now = System.currentTimeMillis()
+
+        // Проверяем условия для сохранения
+        val stepsChanged = kotlin.math.abs(steps - lastSavedSteps) >= minStepDifference
+        val timePassed = (now - lastSaveTimeMs) >= minSaveIntervalMs
+        val isFirstSave = lastSaveTimeMs == 0L
+
+        if (steps > 0 && (isFirstSave || stepsChanged || timePassed)) {
+            lastSavedSteps = steps
+            lastSaveTimeMs = now
+            performSaveSteps(userId, userName)
+        }
+    }
+
+    private fun performSaveSteps(userId: String, userName: String) {
         viewModelScope.launch {
             val steps = _todaySteps.value
             if (steps > 0) {
@@ -138,9 +245,18 @@ class StepCounterViewModel @Inject constructor(
                         put("Item", item)
                     }
 
-                    ydbRepository.executeSignedRequest("PutItem", body)
+                    val result = ydbRepository.executeSignedRequest("PutItem", body)
+                    if (result != null) {
+                        println("StepCounter: ✅ шаги сохранены в YDB: userId=$userId, steps=$steps")
+                        // После сохранения обновляем лидерборды
+                        loadAllLeaderboards()
+                        loadTotals(userId)
+                    } else {
+                        println("StepCounter: ⚠️ не удалось сохранить шаги в YDB")
+                    }
                 } catch (e: Exception) {
                     println("StepCounter ERROR: ${e.message}")
+                    e.printStackTrace()
                 }
             }
         }
@@ -164,6 +280,7 @@ class StepCounterViewModel @Inject constructor(
 
             } catch (e: Exception) {
                 println("Error loading leaderboards: ${e.message}")
+                e.printStackTrace()
             } finally {
                 _isLoading.value = false
             }
@@ -178,21 +295,45 @@ class StepCounterViewModel @Inject constructor(
             put("ExpressionAttributeValues", JSONObject().apply {
                 put(":date", JSONObject().put("S", date))
             })
-            put("Limit", 10)
+            put("Limit", 100)
         }
+
         val result = ydbRepository.executeSignedRequest("Scan", body)
         val items = result?.optJSONArray("Items") ?: JSONArray()
-        val list = (0 until items.length()).map { items.getJSONObject(it) }
-        return list.sortedByDescending { it.optJSONObject("steps")?.optString("N")?.toIntOrNull() ?: 0 }
-            .mapIndexed { index, json ->
-                LeaderboardEntry(
-                    rank = index + 1,
-                    userId = json.optJSONObject("user_id")?.optString("S") ?: "",
-                    userName = json.optJSONObject("user_name")?.optString("S") ?: "",
-                    totalSteps = json.optJSONObject("steps")?.optString("N")?.toIntOrNull() ?: 0,
-                    userAvatar = json.optJSONObject("user_avatar")?.optString("S")?.ifEmpty { null }
-                )
+
+        println("DEBUG: getLeaderboard - получено записей за $date: ${items.length()}")
+
+        val list = (0 until items.length()).map { index ->
+            val json = items.getJSONObject(index)
+            val userId = json.optJSONObject("user_id")?.optString("S") ?: ""
+            val steps = json.optJSONObject("steps")?.optString("N")?.toIntOrNull() ?: 0
+            val userName = json.optJSONObject("user_name")?.optString("S") ?: ""
+            val userAvatar = json.optJSONObject("user_avatar")?.optString("S")?.ifEmpty { null }
+
+            println("DEBUG: getLeaderboard - пользователь $userName: $steps шагов")
+
+            LeaderboardEntry(
+                rank = 0,
+                userId = userId,
+                userName = userName,
+                totalSteps = steps,
+                userAvatar = userAvatar
+            )
+        }
+
+        val sortedList = list
+            .sortedByDescending { it.totalSteps }
+            .take(10)
+            .mapIndexed { index, entry ->
+                entry.copy(rank = index + 1)
             }
+
+        println("DEBUG: getLeaderboard - итоговый список: ${sortedList.size} записей")
+        sortedList.forEach { entry ->
+            println("DEBUG: getLeaderboard - #${entry.rank} ${entry.userName}: ${entry.totalSteps} шагов")
+        }
+
+        return sortedList
     }
 
     private suspend fun getWeeklyLeaderboard(): List<LeaderboardEntry> {
@@ -244,7 +385,7 @@ class StepCounterViewModel @Inject constructor(
     private suspend fun getAllTimeLeaderboard(): List<LeaderboardEntry> {
         val body = JSONObject().apply {
             put("TableName", "steps_doc")
-            put("Limit", 100)
+            put("Limit", 200)
         }
         val result = ydbRepository.executeSignedRequest("Scan", body)
         val items = result?.optJSONArray("Items") ?: JSONArray()
@@ -277,7 +418,7 @@ class StepCounterViewModel @Inject constructor(
                 put(":start", JSONObject().put("S", startDate))
                 put(":end", JSONObject().put("S", endDate))
             })
-            put("Limit", 100)
+            put("Limit", 200)
         }
         val result = ydbRepository.executeSignedRequest("Scan", body)
         val items = result?.optJSONArray("Items") ?: JSONArray()
@@ -336,6 +477,7 @@ class StepCounterViewModel @Inject constructor(
                 _weeklyTotal.value = stats.values.sum()
             } catch (e: Exception) {
                 println("StepCounter observeWeeklyStats ERROR: ${e.message}")
+                e.printStackTrace()
             }
         }
     }
@@ -370,7 +512,11 @@ class StepCounterViewModel @Inject constructor(
                     val json = items.getJSONObject(i)
                     val dateStr = json.optJSONObject("date")?.optString("S") ?: ""
                     val steps = json.optJSONObject("steps")?.optString("N")?.toIntOrNull() ?: 0
-                    val date = try { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateStr) } catch (e: Exception) { null }
+                    val date = try {
+                        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateStr)
+                    } catch (e: Exception) {
+                        null
+                    }
                     if (date != null) {
                         val dateCal = Calendar.getInstance()
                         dateCal.time = date
@@ -384,7 +530,13 @@ class StepCounterViewModel @Inject constructor(
                 _yearlyTotal.value = yearly
             } catch (e: Exception) {
                 println("StepCounter loadTotals ERROR: ${e.message}")
+                e.printStackTrace()
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopPeriodicUpdate()
     }
 }

@@ -25,6 +25,10 @@ firebaseBom = "32.7.2"
 # Hilt
 hilt = "2.48"
 
+# WorkManager
+work = "2.9.0"
+hiltWork = "1.2.0"
+
 # Другие библиотеки
 coil = "2.6.0"
 okhttp = "4.12.0"
@@ -67,6 +71,13 @@ play-services-auth = { module = "com.google.android.gms:play-services-auth", ver
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version = "1.1.0" }
+
+# Hilt Work
+hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "hiltWork" }
+hilt-work-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltWork" }
+
+# WorkManager
+work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 
 # Coroutines
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

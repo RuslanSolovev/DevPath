@@ -1,33 +1,88 @@
 package com.example.devpath.ui
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
-import androidx.compose.animation.core.*
+import android.provider.Settings
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.DateRange
+import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.LocalFireDepartment
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Route
+import androidx.compose.material.icons.outlined.ShowChart
+import androidx.compose.material.icons.outlined.SportsScore
+import androidx.compose.material.icons.outlined.TrendingUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.runtime.*
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import com.example.devpath.domain.models.LeaderboardEntry
 import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.viewmodel.StepCounterViewModel
-import com.google.accompanist.permissions.*
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.PermissionStatus
+import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.isGranted
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -61,14 +116,29 @@ fun StepCounterScreen(
         rememberPermissionState(Manifest.permission.POST_NOTIFICATIONS)
     } else null
 
+    val batteryOptimizationDisabled = try {
+        viewModel.isBatteryOptimizationDisabled(context)
+    } catch (e: Exception) {
+        true
+    }
+
     val targetSteps = 10000
     val progress = (todaySteps.toFloat() / targetSteps).coerceIn(0f, 1f)
-    val animatedSteps by animateIntAsState(targetValue = todaySteps, animationSpec = tween(1000), label = "steps")
-    val animatedProgress by animateFloatAsState(targetValue = progress, animationSpec = tween(1000), label = "progress")
+    val animatedSteps by animateIntAsState(
+        targetValue = todaySteps,
+        animationSpec = tween(1000),
+        label = "steps"
+    )
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(1000),
+        label = "progress"
+    )
 
     var selectedLeaderboardTab by remember { mutableStateOf(0) }
     val leaderboardTabs = listOf("За день", "За неделю", "За месяц", "За всё время")
 
+    // Инициализация при первом запуске
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (notificationPermissionState?.status != PermissionStatus.Granted) {
@@ -84,101 +154,332 @@ fun StepCounterScreen(
         } else {
             viewModel.bindService(context)
         }
-        viewModel.loadAllLeaderboards()
-        viewModel.observeWeeklyStats(currentUserId)
-        viewModel.loadTotals(currentUserId)
+
+        // Запускаем инициализацию и периодическое обновление
+        viewModel.initialize(currentUserId, currentUserName)
     }
 
+    // Сохраняем шаги при изменении
     LaunchedEffect(todaySteps) {
         if (todaySteps > 0) {
-            viewModel.saveSteps(currentUserId, currentUserName)
-            viewModel.loadTotals(currentUserId)
-            viewModel.loadAllLeaderboards()
+            viewModel.saveStepsThrottled(currentUserId, currentUserName)
         }
     }
 
+    // Очистка при уходе с экрана
     DisposableEffect(Unit) {
         onDispose {
-            viewModel.saveSteps(currentUserId, currentUserName)
+            viewModel.saveStepsThrottled(currentUserId, currentUserName)
+            viewModel.stopPeriodicUpdate()
             viewModel.unbindService(context)
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.onSurface)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Назад",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Шагомер", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                    Text(
+                        "Шагомер",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    )
                 }
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && notificationPermissionState?.status != PermissionStatus.Granted) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                notificationPermissionState?.status != PermissionStatus.Granted
+            ) {
                 item {
-                    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(Icons.Outlined.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.Notifications,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Разрешите уведомления", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                                Text("Для отображения прогресса в фоне", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Text(
+                                    "Разрешите уведомления",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Text(
+                                    "Для отображения прогресса в фоне",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                             }
-                            Button(onClick = { notificationPermissionState?.launchPermissionRequest() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) { Text("Разрешить") }
+                            Button(
+                                onClick = {
+                                    notificationPermissionState?.launchPermissionRequest()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondary
+                                )
+                            ) {
+                                Text("Разрешить")
+                            }
                         }
                     }
                 }
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && activityRecognitionPermissionState?.status != PermissionStatus.Granted) {
+            if (!batteryOptimizationDisabled) {
                 item {
-                    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                        Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Outlined.FitnessCenter, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("Необходимо разрешение", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onErrorContainer)
-                            Text("Для подсчета шагов нужно разрешение на физическую активность", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = { activityRecognitionPermissionState?.launchPermissionRequest() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError), shape = RoundedCornerShape(24.dp)) { Text("Разрешить") }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFFFF3E0)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.LocalFireDepartment,
+                                contentDescription = null,
+                                tint = Color(0xFFFF9800),
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Отключите оптимизацию батареи",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = Color(0xFFE65100)
+                                )
+                                Text(
+                                    "Чтобы шагомер работал в фоне без ограничений",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(0xFFBF360C)
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    val intent = Intent(
+                                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                                    ).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFF9800),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Text("Настроить")
+                            }
                         }
                     }
                 }
-            } else {
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                activityRecognitionPermissionState?.status?.isGranted != true
+            ) {
                 item {
-                    Box(modifier = Modifier.fillMaxWidth().height(300.dp).clip(CircleShape).background(Brush.sweepGradient(colors = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.primary))).padding(16.dp), contentAlignment = Alignment.Center) {
-                        Surface(modifier = Modifier.fillMaxSize(), shape = CircleShape, color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
-                            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                Text(text = animatedSteps.toString(), fontSize = 72.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                Text(text = "шагов сегодня", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Outlined.FitnessCenter,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "Необходимо разрешение",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                "Для подсчета шагов нужно разрешение на физическую активность",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    activityRecognitionPermissionState?.launchPermissionRequest()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError
+                                ),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Text("Разрешить")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (activityRecognitionPermissionState?.status?.isGranted != false) {
+                // Главная карточка с шагами
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.sweepGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.secondary,
+                                        MaterialTheme.colorScheme.primary
+                                    )
+                                )
+                            )
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface,
+                            shadowElevation = 8.dp
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = animatedSteps.toString(),
+                                    fontSize = 72.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "шагов сегодня",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Spacer(modifier = Modifier.height(12.dp))
-                                LinearProgressIndicator(progress = animatedProgress, modifier = Modifier.fillMaxWidth(0.8f).height(10.dp).clip(CircleShape), color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.surfaceVariant)
-                                Text(text = "${(progress * 100).toInt()}% от $targetSteps", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+                                LinearProgressIndicator(
+                                    progress = animatedProgress,
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.8f)
+                                        .height(10.dp)
+                                        .clip(CircleShape),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                Text(
+                                    text = "${(progress * 100).toInt()}% от $targetSteps",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }
                 }
 
+                // Недельная статистика
                 item {
-                    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
                         Column(modifier = Modifier.padding(20.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Outlined.ShowChart, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Text("Недельная статистика", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.ShowChart,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    "Недельная статистика",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                             Spacer(modifier = Modifier.height(16.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
                                 listOf("ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС").forEach { day ->
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(text = day, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            text = day,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        Surface(modifier = Modifier.size(48.dp), shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)) {
+                                        Surface(
+                                            modifier = Modifier.size(48.dp),
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                        ) {
                                             Box(contentAlignment = Alignment.Center) {
-                                                Text(text = "${weeklyStats[day] ?: 0}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = if ((weeklyStats[day] ?: 0) > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Text(
+                                                    text = "${weeklyStats[day] ?: 0}",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if ((weeklyStats[day] ?: 0) > 0)
+                                                        MaterialTheme.colorScheme.primary
+                                                    else
+                                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
                                             }
                                         }
                                     }
@@ -188,52 +489,207 @@ fun StepCounterScreen(
                     }
                 }
 
+                // Кнопка пути к Владивостоку
                 item {
-                    Button(onClick = { navController.navigate("journey_map/$yearlyTotal") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+                    Button(
+                        onClick = {
+                            navController.navigate("journey_map/$yearlyTotal")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
                         Icon(Icons.Outlined.Map, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Посмотреть путь к Владивостоку")
                     }
                 }
 
+                // Статистические карточки
                 item {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatsCard(title = "Всего шагов", value = formatNumber(yearlyTotal), icon = Icons.Outlined.TrendingUp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                        StatsCard(title = "Калории", value = formatNumber((todaySteps * 0.04).toInt()), unit = "ккал", icon = Icons.Outlined.LocalFireDepartment, color = Color(0xFFFF9800), modifier = Modifier.weight(1f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatsCard(
+                            title = "Всего шагов",
+                            value = formatNumber(yearlyTotal),
+                            icon = Icons.Outlined.TrendingUp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatsCard(
+                            title = "Калории",
+                            value = formatNumber((todaySteps * 0.04).toInt()),
+                            unit = "ккал",
+                            icon = Icons.Outlined.LocalFireDepartment,
+                            color = Color(0xFFFF9800),
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
                 item {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatsCard(title = "Дистанция", value = formatDistance(todaySteps * 0.0008), unit = "км", icon = Icons.Outlined.Route, color = Color(0xFF4CAF50), modifier = Modifier.weight(1f))
-                        StatsCard(title = "За неделю", value = formatNumber(weeklyTotal), icon = Icons.Outlined.CalendarMonth, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.weight(1f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatsCard(
+                            title = "Дистанция",
+                            value = formatDistance(todaySteps * 0.0008),
+                            unit = "км",
+                            icon = Icons.Outlined.Route,
+                            color = Color(0xFF4CAF50),
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatsCard(
+                            title = "За неделю",
+                            value = formatNumber(weeklyTotal),
+                            icon = Icons.Outlined.CalendarMonth,
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
                 item {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatsCard(title = "За месяц", value = formatNumber(monthlyTotal), icon = Icons.Outlined.DateRange, color = Color(0xFF9C27B0), modifier = Modifier.weight(1f))
-                        StatsCard(title = "За год", value = formatNumber(yearlyTotal), icon = Icons.Outlined.CalendarToday, color = Color(0xFF00BCD4), modifier = Modifier.weight(1f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StatsCard(
+                            title = "За месяц",
+                            value = formatNumber(monthlyTotal),
+                            icon = Icons.Outlined.DateRange,
+                            color = Color(0xFF9C27B0),
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatsCard(
+                            title = "За год",
+                            value = formatNumber(yearlyTotal),
+                            icon = Icons.Outlined.CalendarToday,
+                            color = Color(0xFF00BCD4),
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
+                // Лидерборд
                 item {
-                    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
                         Column(modifier = Modifier.padding(20.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFFFFD700))
-                                Text("Топ активных пользователей", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.EmojiEvents,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFD700)
+                                )
+                                Text(
+                                    "Топ активных пользователей",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                             Spacer(modifier = Modifier.height(16.dp))
-                            TabRow(selectedTabIndex = selectedLeaderboardTab, containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.primary, indicator = { tabPositions -> TabRowDefaults.Indicator(modifier = Modifier.tabIndicatorOffset(tabPositions[selectedLeaderboardTab]), height = 3.dp, color = MaterialTheme.colorScheme.primary) }) {
-                                leaderboardTabs.forEachIndexed { index, title -> Tab(selected = selectedLeaderboardTab == index, onClick = { selectedLeaderboardTab = index }, text = { Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = if (selectedLeaderboardTab == index) FontWeight.Bold else FontWeight.Normal) }) }
+                            TabRow(
+                                selectedTabIndex = selectedLeaderboardTab,
+                                containerColor = Color.Transparent,
+                                contentColor = MaterialTheme.colorScheme.primary,
+                                indicator = { tabPositions ->
+                                    TabRowDefaults.Indicator(
+                                        modifier = Modifier.tabIndicatorOffset(
+                                            tabPositions[selectedLeaderboardTab]
+                                        ),
+                                        height = 3.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            ) {
+                                leaderboardTabs.forEachIndexed { index, title ->
+                                    Tab(
+                                        selected = selectedLeaderboardTab == index,
+                                        onClick = { selectedLeaderboardTab = index },
+                                        text = {
+                                            Text(
+                                                title,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = if (selectedLeaderboardTab == index)
+                                                    FontWeight.Bold
+                                                else
+                                                    FontWeight.Normal
+                                            )
+                                        }
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.height(16.dp))
-                            if (isLoading) { Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
-                            else {
-                                val currentLeaderboard = when (selectedLeaderboardTab) { 0 -> todayLeaderboard; 1 -> weeklyLeaderboard; 2 -> monthlyLeaderboard; else -> allTimeLeaderboard }
-                                if (currentLeaderboard.isEmpty()) { Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Outlined.SportsScore, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(modifier = Modifier.height(8.dp)); Text("Пока нет данных", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
-                                else { currentLeaderboard.forEach { entry -> LeaderboardItem(rank = entry.rank, name = entry.userName, steps = entry.totalSteps, avatarUrl = entry.userAvatar, isCurrentUser = entry.userId == currentUserId); if (entry != currentLeaderboard.last()) Divider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant) } }
+
+                            if (isLoading) {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator()
+                                }
+                            } else {
+                                val currentLeaderboard = when (selectedLeaderboardTab) {
+                                    0 -> todayLeaderboard
+                                    1 -> weeklyLeaderboard
+                                    2 -> monthlyLeaderboard
+                                    else -> allTimeLeaderboard
+                                }
+
+                                if (currentLeaderboard.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.SportsScore,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(48.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                "Пока нет данных",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    currentLeaderboard.forEachIndexed { index, entry ->
+                                        LeaderboardItem(
+                                            rank = entry.rank,
+                                            name = entry.userName,
+                                            steps = entry.totalSteps,
+                                            avatarUrl = entry.userAvatar,
+                                            isCurrentUser = entry.userId == currentUserId
+                                        )
+                                        if (index < currentLeaderboard.size - 1) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(vertical = 8.dp),
+                                                color = MaterialTheme.colorScheme.outlineVariant
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -244,37 +700,147 @@ fun StepCounterScreen(
 }
 
 @Composable
-fun StatsCard(title: String, value: String, unit: String = "", icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color, modifier: Modifier = Modifier) {
-    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Surface(modifier = Modifier.size(40.dp), shape = CircleShape, color = color.copy(alpha = 0.15f)) { Box(contentAlignment = Alignment.Center) { Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(22.dp)) } }
+fun StatsCard(
+    title: String,
+    value: String,
+    unit: String = "",
+    icon: ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = CircleShape,
+                color = color.copy(alpha = 0.15f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(12.dp))
-            Text(text = title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                if (unit.isNotEmpty()) Text(text = unit, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (unit.isNotEmpty()) {
+                    Text(
+                        text = unit,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun LeaderboardItem(rank: Int, name: String, steps: Int, avatarUrl: String?, isCurrentUser: Boolean) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-            when (rank) { 1 -> Text("🥇", fontSize = 28.sp); 2 -> Text("🥈", fontSize = 28.sp); 3 -> Text("🥉", fontSize = 28.sp); else -> Surface(modifier = Modifier.size(28.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) { Box(contentAlignment = Alignment.Center) { Text("$rank", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+fun LeaderboardItem(
+    rank: Int,
+    name: String,
+    steps: Int,
+    avatarUrl: String?,
+    isCurrentUser: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            when (rank) {
+                1 -> Text("🥇", fontSize = 28.sp)
+                2 -> Text("🥈", fontSize = 28.sp)
+                3 -> Text("🥉", fontSize = 28.sp)
+                else -> Surface(
+                    modifier = Modifier.size(28.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            "$rank",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
-        UserAvatar(avatarUrl = avatarUrl, name = name, size = 44)
+        UserAvatar(
+            avatarUrl = avatarUrl,
+            name = name,
+            size = 44
+        )
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = name.take(20), style = MaterialTheme.typography.bodyLarge, fontWeight = if (isCurrentUser) FontWeight.Bold else FontWeight.Medium, color = if (isCurrentUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-            if (isCurrentUser) Text("Вы", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text(
+                text = name.take(20),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (isCurrentUser) FontWeight.Bold else FontWeight.Medium,
+                color = if (isCurrentUser) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface
+            )
+            if (isCurrentUser) {
+                Text(
+                    "Вы",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text(text = formatNumber(steps), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text(text = "шагов", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = formatNumber(steps),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "шагов",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
-private fun formatNumber(number: Int): String = String.format("%,d", number).replace(',', ' ')
-private fun formatDistance(distance: Double): String = String.format("%.3f", distance).replace(',', '.')
+private fun formatNumber(number: Int): String {
+    return String.format("%,d", number).replace(',', ' ')
+}
+
+private fun formatDistance(distance: Double): String {
+    return String.format("%.3f", distance).replace(',', '.')
+}

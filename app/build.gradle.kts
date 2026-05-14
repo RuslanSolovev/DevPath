@@ -91,7 +91,6 @@ android {
 
 dependencies {
 
-
     // Яндекс Карты
     implementation("com.yandex.android:maps.mobile:4.5.1-full")
 
@@ -138,6 +137,13 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
     implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.0")
     implementation("androidx.lifecycle:lifecycle-process:2.8.0")
+
+    // WorkManager
+    implementation(libs.work.runtime.ktx)
+
+    // Hilt Work
+    implementation(libs.hilt.work)
+    kapt(libs.hilt.work.compiler)
 
     // Auth
     implementation(libs.play.services.auth)
