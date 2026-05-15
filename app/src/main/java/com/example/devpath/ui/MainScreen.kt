@@ -61,6 +61,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.delay
 
 enum class MainTab2(val title: String) {
@@ -108,7 +110,7 @@ fun MainScreen(mapView: MapView? = null) {
             currentUserAvatar = prefs.getString("user_avatar", "") ?: ""
             isAuthenticated = true
         }
-        delay(500) // Минимальное время показа загрузки
+        delay(3000) // Увеличено с 500ms до 2000ms (2 секунды)
         isLoading = false
     }
 
@@ -117,85 +119,232 @@ fun MainScreen(mapView: MapView? = null) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background),
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.background,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                            MaterialTheme.colorScheme.background
+                        )
+                    )
+                ),
             contentAlignment = Alignment.Center
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
-                // Анимированный логотип
+                // Анимированный логотип с частицами
                 Box(
-                    modifier = Modifier.size(100.dp),
+                    modifier = Modifier.size(140.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Внешнее кольцо
-                    CircularProgressIndicator(
-                        progress = animatedProgress,
-                        modifier = Modifier.size(100.dp),
-                        strokeWidth = 4.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    // Орбита 1 (самая внешняя) — медленное вращение
+                    val infiniteTransition = rememberInfiniteTransition(label = "orbit1")
+                    val orbit1Rotation by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(4000, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "orbit1"
                     )
-                    // Внутреннее кольцо (вращается в обратную сторону)
-                    CircularProgressIndicator(
-                        progress = 1f - animatedProgress,
-                        modifier = Modifier.size(70.dp),
-                        strokeWidth = 3.dp,
-                        color = MaterialTheme.colorScheme.secondary,
-                        trackColor = Color.Transparent
+
+                    // Орбита 2 — вращается в обратную сторону
+                    val orbit2Rotation by infiniteTransition.animateFloat(
+                        initialValue = 360f,
+                        targetValue = 0f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(3000, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "orbit2"
                     )
-                    // Иконка в центре
+
+                    // Орбита 3 — быстрое вращение
+                    val orbit3Rotation by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(2000, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "orbit3"
+                    )
+
+                    // Точки на орбитах
+                    // Орбита 1 — большая, медленная
+                    Box(
+                        modifier = Modifier
+                            .size(130.dp)
+                            .graphicsLayer(rotationZ = orbit1Rotation)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .offset(x = 61.dp, y = 0.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF64B5F6))
+                        )
+                    }
+
+                    // Орбита 2 — средняя
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .graphicsLayer(rotationZ = orbit2Rotation)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .offset(x = 47.dp, y = 0.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFFB74D))
+                        )
+                    }
+
+                    // Орбита 3 — маленькая, быстрая
+                    Box(
+                        modifier = Modifier
+                            .size(70.dp)
+                            .graphicsLayer(rotationZ = orbit3Rotation)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .offset(x = 32.dp, y = 0.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF81C784))
+                        )
+                    }
+
+                    // Центральный элемент — пульсирующий круг
+                    val pulseScale by infiniteTransition.animateFloat(
+                        initialValue = 0.9f,
+                        targetValue = 1.1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1000, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulse"
+                    )
+
                     Surface(
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier
+                            .size(56.dp)
+                            .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale),
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                        color = MaterialTheme.colorScheme.primary,
+                        shadowElevation = 8.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("🚀", fontSize = 24.sp)
+                            Text(
+                                "🚀",
+                                fontSize = 28.sp
+                            )
                         }
                     }
                 }
 
-                // Текст
+                // Текст с анимацией появления
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         "DevPath",
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.headlineLarge,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        letterSpacing = 4.sp
                     )
+
+                    // Анимированный текст загрузки
+                    val dotsCount by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 3f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1500, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "dots"
+                    )
+
                     Text(
-                        "Загрузка...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "Загрузка${".".repeat(dotsCount.toInt())}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        letterSpacing = 2.sp
                     )
                 }
 
-                // Прогресс-бар
+                // Прогресс-бар с градиентом и бликом
                 Box(
                     modifier = Modifier
-                        .width(200.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
+                        .width(220.dp)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
+                    // Основной прогресс
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
                             .fillMaxWidth(animatedProgress)
-                            .clip(RoundedCornerShape(2.dp))
+                            .clip(RoundedCornerShape(3.dp))
                             .background(
                                 Brush.horizontalGradient(
                                     colors = listOf(
+                                        Color(0xFF64B5F6),
                                         MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.secondary
+                                        Color(0xFF81C784),
+                                        Color(0xFFFFB74D)
                                     )
                                 )
                             )
+                    )
+
+                    // Блик на прогресс-баре
+                    val shimmerOffset by infiniteTransition.animateFloat(
+                        initialValue = -1f,
+                        targetValue = 2f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(2000, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "shimmer"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.3f)
+                            .offset(x = (shimmerOffset * 220).dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.White.copy(alpha = 0.3f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+                }
+
+                // Подсказка
+                Surface(
+                    modifier = Modifier.padding(top = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ) {
+                    Text(
+                        "Готовим что-то интересное...",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -611,27 +760,18 @@ fun HomeTabScreen(
     var isLoadingAnnouncements by remember { mutableStateOf(true) }
     var displayName by remember { mutableStateOf(currentUserName) }
     var userEmail by remember { mutableStateOf(currentUserEmail) }
-    var userAvatar by remember { mutableStateOf(currentUserAvatar) }  // ✅ Эта переменная есть!
+    var userAvatar by remember { mutableStateOf(currentUserAvatar) }
 
     var showCreateDialog by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val OWNER_ID = Config.OWNER_USER_ID
 
     LaunchedEffect(currentUserId) {
         try {
-            println("DEBUG: Загружаю профиль для userId=$currentUserId")
             val user = ydbRepository.getUser(currentUserId)
-            println("DEBUG: Данные пользователя: $user")
-
-            // ✅ Обновляем состояние!
             displayName = user?.optJSONObject("name")?.optString("S", "Пользователь") ?: "Пользователь"
             userEmail = user?.optJSONObject("email")?.optString("S", "") ?: ""
             val avatar = user?.optJSONObject("avatar_url")?.optString("S", "")
-
-            println("DEBUG: Загружено - name=$displayName, email=$userEmail, avatar=$avatar")
-
-            // ✅ ИСПРАВЛЕНО: avatarUrl -> userAvatar
             if (!avatar.isNullOrEmpty()) {
                 userAvatar = avatar
             }
@@ -681,38 +821,30 @@ fun HomeTabScreen(
             }
         }
 
-        // Карточки быстрого доступа
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth()
+        // Карточки быстрого доступа на всю ширину и высоту
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f), // Занимают всё доступное пространство
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item {
-                QuickAccessCard(
-                    title = "Шагомер",
-                    subtitle = "Считай шаги",
-                    icon = Icons.Outlined.DirectionsWalk,
-                    gradient = listOf(Color(0xFF4CAF50), Color(0xFF2E7D32)),
-                    onClick = onNavigateToStepCounter
-                )
-            }
-            item {
-                QuickAccessCard(
-                    title = "Карта",
-                    subtitle = "Друзья рядом",
-                    icon = Icons.Outlined.Map,
-                    gradient = listOf(Color(0xFF2196F3), Color(0xFF0D47A1)),
-                    onClick = onNavigateToMap
-                )
-            }
-            item {
-                QuickAccessCard(
-                    title = "Игры",
-                    subtitle = "Мини-игры",
-                    icon = Icons.Outlined.SportsEsports,
-                    gradient = listOf(Color(0xFFFF9800), Color(0xFFE65100)),
-                    onClick = onNavigateToGamesHub
-                )
-            }
+            QuickAccessCardFull(
+                title = "Шагомер",
+                subtitle = "Считай шаги",
+                icon = Icons.Outlined.DirectionsWalk,
+                gradient = listOf(Color(0xFF4CAF50), Color(0xFF2E7D32)),
+                onClick = onNavigateToStepCounter,
+                modifier = Modifier.weight(1f)
+            )
+
+            QuickAccessCardFull(
+                title = "Карта",
+                subtitle = "Друзья рядом",
+                icon = Icons.Outlined.Map,
+                gradient = listOf(Color(0xFF2196F3), Color(0xFF0D47A1)),
+                onClick = onNavigateToMap,
+                modifier = Modifier.weight(1f)
+            )
         }
 
         // Кнопка создания объявления (только для владельца)
@@ -730,7 +862,7 @@ fun HomeTabScreen(
             }
         }
 
-        // ✅ Диалог создания объявления (если нужно - реализуй здесь)
+        // Диалог создания объявления
         if (showCreateDialog) {
             AlertDialog(
                 onDismissRequest = { showCreateDialog = false },
@@ -783,6 +915,168 @@ fun HomeTabScreen(
                     iconColor = MaterialTheme.colorScheme.primary,
                     backgroundColor = MaterialTheme.colorScheme.primaryContainer,
                     onDismiss = { dismissAnnouncement(ann.optString("announcement_id")) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickAccessCardFull(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    gradient: List<Color>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxHeight() // Занимает всю доступную высоту
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(24.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(colors = gradient))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Иконка в круге
+                Surface(
+                    modifier = Modifier.size(80.dp),
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.2f),
+                    shadowElevation = 4.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Заголовок
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Подзаголовок
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.9f),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Кнопка-стрелка
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.3f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickAccessCardFull(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    gradient: List<Color>,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(100.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.horizontalGradient(colors = gradient))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Иконка в круге
+                Surface(
+                    modifier = Modifier.size(56.dp),
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.2f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(32.dp),
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                // Текст
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                }
+
+                // Стрелка
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = Color.White.copy(alpha = 0.7f)
                 )
             }
         }

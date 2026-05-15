@@ -8,6 +8,7 @@ import com.example.devpath.data.repository.YdbRepository
 import com.example.devpath.data.repository.UserLocation
 import com.example.devpath.data.repository.LocationSettings
 import com.example.devpath.domain.models.MapMarker
+import com.example.devpath.domain.models.MarkerType
 import com.example.devpath.domain.models.UserProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import javax.inject.Inject
 
 @HiltViewModel
@@ -131,6 +133,58 @@ class MapViewModel @Inject constructor(
     suspend fun joinMarker(markerId: String) {
         val userId = _currentUserProfile.value?.userId ?: return
         eventsRepository.joinMarker(markerId, userId)
+
+        // Получаем обновленный маркер
+        val marker = eventsRepository.getMarker(markerId)
+
+        // Если у маркера есть chatId, проверяем и добавляем чат в список
+        if (marker?.chatId != null && marker.chatId.isNotEmpty() && marker.chatId != "auto") {
+            // Проверяем, есть ли уже этот чат в списке
+            val existingChats = ydbRepository.getUserChats(userId)
+            val chatExists = existingChats.any { chat ->
+                chat.optJSONObject("chat_id")?.optString("S") == marker.chatId
+            }
+
+            if (!chatExists) {
+                // Если чата нет в списке — добавляем пользователя в participants
+                println("DEBUG: joinMarker - чат ${marker.chatId} не найден в списке, добавляем пользователя $userId")
+
+                // Проверяем, существует ли чат в БД
+                val existingChat = ydbRepository.getChat(marker.chatId)
+                if (existingChat != null) {
+                    // Чат существует — добавляем пользователя
+                    ydbRepository.removeUserFromChat(marker.chatId, userId) // На всякий случай удаляем, если был
+                    ydbRepository.addUserToChat(marker.chatId, userId)
+                } else {
+                    // Чат был удалён — пересоздаём
+                    ydbRepository.createChat(
+                        chatId = marker.chatId,
+                        type = "community",
+                        participants = listOf(userId),
+                        name = marker.title,
+                        createdBy = marker.createdBy
+                    )
+
+                    // Восстанавливаем аватар
+                    val chatAvatar = JSONObject().apply {
+                        put("type", "marker")
+                        put("marker_type", marker.type.name)
+                        put("color", when (marker.type) {
+                            MarkerType.EVENT -> "#FF9800"
+                            MarkerType.DISCUSSION -> "#4CAF50"
+                            else -> "#FF9800"
+                        })
+                        put("emoji", when (marker.type) {
+                            MarkerType.EVENT -> "🎉"
+                            MarkerType.DISCUSSION -> "💬"
+                            else -> "📢"
+                        })
+                    }
+
+                    ydbRepository.updateChatAvatar(marker.chatId, chatAvatar.toString())
+                }
+            }
+        }
     }
 
     suspend fun leaveMarker(markerId: String) {

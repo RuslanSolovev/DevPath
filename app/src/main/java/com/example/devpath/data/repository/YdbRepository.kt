@@ -120,6 +120,69 @@ class YdbRepository @Inject constructor() {
         )
     }
 
+    suspend fun addUserToChat(chatId: String, userId: String): Boolean {
+        val key = JSONObject().apply { put("chat_id", JSONObject().put("S", chatId)) }
+        val body = JSONObject().apply {
+            put("TableName", chatsTable)
+            put("Key", key)
+            put("UpdateExpression", "ADD participants :userId")
+            put("ExpressionAttributeValues", JSONObject().apply {
+                put(":userId", JSONObject().put("SS", JSONArray(listOf(userId))))
+            })
+        }
+        val result = executeSignedRequest("UpdateItem", body)
+        println("DEBUG: addUserToChat - userId=$userId to chat=$chatId, success=${result != null}")
+        return result != null
+    }
+
+    suspend fun updateChatAvatar(chatId: String, chatAvatarJson: String): Boolean {
+        val key = JSONObject().apply { put("chat_id", JSONObject().put("S", chatId)) }
+        val body = JSONObject().apply {
+            put("TableName", chatsTable)
+            put("Key", key)
+            put("UpdateExpression", "SET chat_avatar = :avatar")
+            put("ExpressionAttributeValues", JSONObject().apply {
+                put(":avatar", JSONObject().put("S", chatAvatarJson))
+            })
+        }
+        val result = executeSignedRequest("UpdateItem", body)
+        println("DEBUG: updateChatAvatar - chat=$chatId, success=${result != null}")
+        return result != null
+    }
+
+    suspend fun getAllUsersPaginated(
+        limit: Int = 20,
+        lastEvaluatedKey: JSONObject? = null
+    ): Pair<List<JSONObject>, JSONObject?> {
+        val body = JSONObject().apply {
+            put("TableName", usersTable)
+            put("Limit", limit)
+            if (lastEvaluatedKey != null) {
+                put("ExclusiveStartKey", lastEvaluatedKey)
+            }
+        }
+        val result = executeSignedRequest("Scan", body)
+        val items = result?.optJSONArray("Items") ?: JSONArray()
+        val users = (0 until items.length()).map { items.getJSONObject(it) }
+        val nextKey = result?.optJSONObject("LastEvaluatedKey")
+        return Pair(users, nextKey)
+    }
+
+    suspend fun removeUserFromChat(chatId: String, userId: String): Boolean {
+        val key = JSONObject().apply { put("chat_id", JSONObject().put("S", chatId)) }
+        val body = JSONObject().apply {
+            put("TableName", chatsTable)
+            put("Key", key)
+            put("UpdateExpression", "DELETE participants :userId")
+            put("ExpressionAttributeValues", JSONObject().apply {
+                put(":userId", JSONObject().put("SS", JSONArray(listOf(userId))))
+            })
+        }
+        val result = executeSignedRequest("UpdateItem", body)
+        println("DEBUG: removeUserFromChat - userId=$userId from chat=$chatId, success=${result != null}")
+        return result != null
+    }
+
     suspend fun getNewMessages(chatId: String, lastTimestamp: Long): List<JSONObject> {
         val allMessages = mutableListOf<JSONObject>()
         var lastEvaluatedKey: JSONObject? = null

@@ -83,6 +83,57 @@ class ChatsViewModel @Inject constructor(
     private var pollingJob: Job? = null
 
 
+    private val _allUsers = MutableStateFlow<List<UserProfile>>(emptyList())
+    val allUsers: StateFlow<List<UserProfile>> = _allUsers.asStateFlow()
+
+    private val _isLoadingMoreUsers = MutableStateFlow(false)
+    val isLoadingMoreUsers: StateFlow<Boolean> = _isLoadingMoreUsers.asStateFlow()
+
+    private val _hasMoreUsers = MutableStateFlow(true)
+    val hasMoreUsers: StateFlow<Boolean> = _hasMoreUsers.asStateFlow()
+
+    private val _isInitialLoading = MutableStateFlow(false)
+    val isInitialLoading: StateFlow<Boolean> = _isInitialLoading.asStateFlow()
+
+    private var lastEvaluatedKey: JSONObject? = null
+
+    fun loadInitialUsers() {
+        if (_isInitialLoading.value || _allUsers.value.isNotEmpty()) return  // ← Не загружаем повторно
+        viewModelScope.launch {
+            _isInitialLoading.value = true
+            _isLoadingMoreUsers.value = true
+            try {
+                val (users, nextKey) = ydbRepository.getAllUsersPaginated(30)
+                _allUsers.value = users.map { jsonToUserProfile(it) }
+                lastEvaluatedKey = nextKey
+                _hasMoreUsers.value = nextKey != null && nextKey.length() > 0
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isLoadingMoreUsers.value = false
+                _isInitialLoading.value = false
+            }
+        }
+    }
+
+    fun loadMoreUsers() {
+        if (!_hasMoreUsers.value || _isLoadingMoreUsers.value) return
+        viewModelScope.launch {
+            _isLoadingMoreUsers.value = true
+            try {
+                val (users, nextKey) = ydbRepository.getAllUsersPaginated(30, lastEvaluatedKey)
+                _allUsers.value = _allUsers.value + users.map { jsonToUserProfile(it) }
+                lastEvaluatedKey = nextKey
+                _hasMoreUsers.value = nextKey != null && nextKey.length() > 0
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isLoadingMoreUsers.value = false
+            }
+        }
+    }
+
+
 
     // ==================== POLLING ====================
 
@@ -221,7 +272,9 @@ class ChatsViewModel @Inject constructor(
     fun searchUsers(query: String) {
         viewModelScope.launch {
             if (query.isBlank()) {
-                _searchResults.value = emptyList(); return@launch
+                // Не сбрасываем результаты, если запрос пустой
+                // _searchResults.value = emptyList()  // ← УБРАТЬ ЭТО
+                return@launch
             }
             _searchResults.value = ydbRepository.searchUsers(query).map { jsonToUserProfile(it) }
         }
@@ -295,16 +348,24 @@ class ChatsViewModel @Inject constructor(
 
     fun deleteChat(chatId: String, currentUserId: String) {
         viewModelScope.launch {
-            // Мгновенное удаление из UI
+            // Мгновенно удаляем из UI
             _chats.value = _chats.value.filter { it.chatId != chatId }
 
-            val success = ydbRepository.deleteChat(chatId)
+            // Получаем чат, чтобы узнать его тип
+            val chatJson = ydbRepository.getChat(chatId)
+            val chatType = chatJson?.optJSONObject("type")?.optString("S") ?: "personal"
+
+            val success = if (chatType == "personal") {
+                // Для личных чатов — полное удаление
+                ydbRepository.deleteChat(chatId)
+            } else {
+                // Для community/event/discussion — только выход пользователя
+                ydbRepository.removeUserFromChat(chatId, currentUserId)
+            }
 
             if (!success) {
                 // Если не удалилось — восстанавливаем список
-                _chats.value = ydbRepository.getUserChats(currentUserId).map {
-                    jsonToChat(it, currentUserId)
-                }
+                loadChats(currentUserId)
             }
         }
     }

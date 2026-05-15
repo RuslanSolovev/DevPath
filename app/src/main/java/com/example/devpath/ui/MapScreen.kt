@@ -71,6 +71,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.graphicsLayer
+
 // ============================================================================
 // 🎨 ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ОТРИСОВКИ МАРКЕРОВ ПОЛЬЗОВАТЕЛЕЙ
 // ============================================================================
@@ -1206,8 +1215,10 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
     var cameraSetForCurrentLocation by remember { mutableStateOf(false) }
 
     var showSettingsDialog by remember { mutableStateOf(false) }
-    var localVisibility by remember { mutableStateOf("all") }           // ← ДОБАВИТЬ
-    var localSelectedFriends by remember { mutableStateOf<List<String>>(emptyList()) }  // ← ДОБАВИТЬ
+    var localVisibility by remember { mutableStateOf("all") }
+    var localSelectedFriends by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    var animationStartTime by remember { mutableStateOf(0L) }
 
     fun updateCameraAddress(latitude: Double, longitude: Double) {
         geocodeJob?.cancel()
@@ -1230,9 +1241,10 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
         if (locationPermissionState.status.isGranted) {
             viewModel.startLocationUpdates(currentUserId, currentUserName, null)
             viewModel.loadNearbyUsers(currentUserId)
-            // УБРАТЬ ЭТУ СТРОКУ: viewModel.loadLocationSettings(currentUserId)
-            // Настройки загружаются внутри startLocationUpdates с проверкой settingsLoaded
         }
+
+        // Запоминаем время старта анимации
+        animationStartTime = System.currentTimeMillis()
     }
 
     LaunchedEffect(currentLocation) {
@@ -1295,9 +1307,7 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
             }
         )
 
-        // ЖДЁМ ЛОКАЦИЮ перед тем как показать карту
-        // Если локация уже есть — сразу готово
-        // Если нет — ждём через snapshotFlow
+        // ЖДЁМ ЛОКАЦИЮ
         if (currentLocation != null) {
             val loc = currentLocation!!
             mapView.map.move(
@@ -1309,9 +1319,7 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
             updateCameraAddress(loc.latitude, loc.longitude)
             cameraSetForCurrentLocation = true
             isMapReady = true
-            isMapLoading = false
         } else {
-            // Ждём локацию, карта показывает загрузку
             snapshotFlow { currentLocation }
                 .first { it != null }
                 .let { loc ->
@@ -1328,8 +1336,18 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                     }
                 }
             isMapReady = true
-            isMapLoading = false
         }
+
+        // Гарантируем минимум 5 секунд анимации
+        val elapsedSinceStart = System.currentTimeMillis() - animationStartTime
+        val minAnimationTime = 2500L
+        val remainingTime = minAnimationTime - elapsedSinceStart
+
+        if (remainingTime > 0) {
+            delay(remainingTime)
+        }
+
+        isMapLoading = false
     }
 
     // Периодическая подгрузка маркеров (каждые 30 секунд)
@@ -1420,38 +1438,251 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
             }
 
             if (isMapLoading) {
+                // Анимированные состояния
+                var animationProgress by remember { mutableStateOf(0f) }
+                var currentMessageIndex by remember { mutableStateOf(0) }
+
+                val loadingMessages = listOf(
+                    "Сканируем горизонт..." to "🔭",
+                    "Прокладываем маршруты..." to "🧭",
+                    "Ищем попутчиков..." to "👥",
+                    "Загружаем карту..." to "🗺️",
+                    "Настраиваем локацию..." to "📍",
+                    "Почти готово..." to "✨"
+                )
+
+                // Анимация прогресса
+                LaunchedEffect(Unit) {
+                    val startTime = System.currentTimeMillis()
+                    val duration = 3000L
+
+                    while (isMapLoading) {
+                        val elapsed = System.currentTimeMillis() - startTime
+                        animationProgress = (elapsed.toFloat() / duration).coerceIn(0f, 1f)
+                        currentMessageIndex = ((elapsed / 500) % loadingMessages.size).toInt()
+                        delay(16)
+                    }
+                }
+
                 Box(
-                    Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable(enabled = false) {},
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFFF8F9FA),
+                                    Color(0xFFE3F2FD),
+                                    Color(0xFFF3E5F5),
+                                    Color(0xFFF8F9FA)
+                                )
+                            )
+                        )
+                        .clickable(enabled = false) {},
                     contentAlignment = Alignment.Center
                 ) {
-                    Card(
-                        Modifier.widthIn(min = 200.dp, max = 300.dp).padding(32.dp),
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                    // Декоративные круги на фоне
+                    repeat(4) { index ->
+                        val size = (100 + index * 80).dp
+                        val offsetX = when (index % 2) {
+                            0 -> -80.dp
+                            else -> 80.dp
+                        }
+                        val offsetY = when (index / 2) {
+                            0 -> -100.dp
+                            else -> 100.dp
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = offsetX, y = offsetY)
+                                .size(size)
+                                .graphicsLayer {
+                                    alpha = 0.04f + (animationProgress * 0.04f)
+                                    scaleX = 0.9f + (animationProgress * 0.2f)
+                                    scaleY = 0.9f + (animationProgress * 0.2f)
+                                }
+                                .background(
+                                    if (index % 2 == 0) Color(0xFF42A5F5)
+                                    else Color(0xFFAB47BC),
+                                    CircleShape
+                                )
+                        )
+                    }
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(32.dp)
                     ) {
-                        Column(
-                            Modifier.padding(32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(20.dp)
+                        // Анимированная иконка
+                        Box(
+                            modifier = Modifier
+                                .size(130.dp)
+                                .graphicsLayer {
+                                    rotationZ = animationProgress * 360f
+                                    scaleX = 0.85f + (animationProgress * 0.15f)
+                                    scaleY = 0.85f + (animationProgress * 0.15f)
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
+                            // Внешнее кольцо
                             Surface(
-                                Modifier.size(80.dp),
+                                modifier = Modifier.size(130.dp),
                                 shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                color = Color.White,
+                                shadowElevation = 12.dp
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Outlined.MyLocation, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                                    // Среднее кольцо
+                                    Surface(
+                                        modifier = Modifier.size(95.dp),
+                                        shape = CircleShape,
+                                        color = Color(0xFFF0F4FF),
+                                        border = BorderStroke(2.dp, Color(0xFF42A5F5).copy(alpha = 0.3f))
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            // Внутренний круг с иконкой
+                                            Surface(
+                                                modifier = Modifier.size(65.dp),
+                                                shape = CircleShape,
+                                                color = Color(0xFFE3F2FD),
+                                                border = BorderStroke(2.dp, Color(0xFF42A5F5))
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        text = loadingMessages[currentMessageIndex].second,
+                                                        fontSize = 30.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Определяем местоположение", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-                                Text("Пожалуйста, подождите...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+
+                            // Декоративные точки по кругу
+                            repeat(8) { index ->
+                                val angle = Math.toRadians((index * 45.0 + (animationProgress * 360.0)))
+                                val radius = 60f
+                                val x = (Math.cos(angle) * radius).toFloat()
+                                val y = (Math.sin(angle) * radius).toFloat()
+
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x.dp, y.dp)
+                                        .size(8.dp)
+                                        .background(
+                                            Color(0xFF42A5F5).copy(alpha = 0.8f),
+                                            CircleShape
+                                        )
+                                )
                             }
-                            LinearProgressIndicator(
-                                Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        }
+
+                        Spacer(modifier = Modifier.height(40.dp))
+
+                        // Анимированный текст
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.animateContentSize()
+                        ) {
+                            Text(
+                                text = loadingMessages[currentMessageIndex].first,
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 20.sp
+                                ),
+                                color = Color(0xFF1565C0),
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "DevPath Map",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    letterSpacing = 3.sp
+                                ),
+                                color = Color(0xFF7B1FA2).copy(alpha = 0.6f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(32.dp))
+
+                        // Светлый прогресс-бар
+                        Box(
+                            modifier = Modifier
+                                .width(220.dp)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFFE0E0E0))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(fraction = animationProgress)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            colors = listOf(
+                                                Color(0xFF42A5F5),
+                                                Color(0xFF7E57C2),
+                                                Color(0xFFEC407A)
+                                            )
+                                        )
+                                    )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Процент загрузки
+                        Text(
+                            text = "${(animationProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            ),
+                            color = Color(0xFF1565C0),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(32.dp))
+
+                        // Анимированные точки в конце
+                        if (animationProgress > 0.6f) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                repeat(3) { index ->
+                                    val active = ((System.currentTimeMillis() / 250 + index) % 3 == 0L)
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .graphicsLayer {
+                                                alpha = if (active) 1f else 0.3f
+                                                translationY = if (active) -6.dp.toPx() else 0f
+                                            }
+                                            .background(
+                                                if (active) Color(0xFF42A5F5)
+                                                else Color(0xFFB0BEC5),
+                                                CircleShape
+                                            )
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = "Загружаем карту...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF78909C),
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
@@ -1729,7 +1960,7 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                     )
                 }
 
-                // Диалог маркера
+// Диалог маркера
                 if (selectedEventMarker != null && !showParticipantsDialog && !showDeleteConfirmDialog) {
                     MarkerDetailDialog(
                         marker = selectedEventMarker!!,
@@ -1748,10 +1979,20 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                                 // Загружаем обновлённый маркер (теперь пользователь в participants)
                                 val updatedMarker = viewModel.getMarker(markerId)
                                 if (updatedMarker != null) {
-                                    // Обновляем selectedEventMarker — диалог перерисуется с новыми данными
                                     selectedEventMarker = updatedMarker
+
+                                    // Гарантируем, что пользователь добавлен в чат
+                                    if (updatedMarker.chatId != null && updatedMarker.chatId.isNotEmpty() && updatedMarker.chatId != "auto") {
+                                        val chat = ydbRepository.getChat(updatedMarker.chatId)
+                                        val participants = chat?.optJSONObject("participants")?.optJSONArray("SS")
+                                        val isInChat = participants != null &&
+                                                (0 until participants.length()).any { participants.getString(it) == currentUserId }
+
+                                        if (!isInChat) {
+                                            ydbRepository.addUserToChat(updatedMarker.chatId, currentUserId)
+                                        }
+                                    }
                                 }
-                                // НЕ закрываем диалог!
                             }
                         },
                         onLeave = {
@@ -1762,17 +2003,32 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                         },
                         onDelete = { showDeleteConfirmDialog = true },
                         onOpenChat = {
-                            selectedEventMarker?.chatId?.let { chatId ->
-                                navController.navigate("chat_detail/$chatId/${selectedEventMarker!!.id}")
+                            selectedEventMarker?.let { marker ->
+                                coroutineScope.launch {
+                                    val chatId = marker.chatId
+                                    if (chatId != null && chatId.isNotEmpty() && chatId != "auto") {
+                                        // Проверяем и добавляем пользователя в чат если нужно
+                                        val chat = ydbRepository.getChat(chatId)
+                                        val participants = chat?.optJSONObject("participants")?.optJSONArray("SS")
+                                        val isInChat = participants != null &&
+                                                (0 until participants.length()).any { participants.getString(it) == currentUserId }
+
+                                        if (!isInChat) {
+                                            ydbRepository.addUserToChat(chatId, currentUserId)
+                                        }
+
+                                        navController.navigate("chat_detail/$chatId/${marker.id}")
+                                    }
+                                    selectedEventMarker = null
+                                }
                             }
-                            selectedEventMarker = null
                         },
                         onReport = { showMarkerReportDialog = true },
                         onShowParticipants = { showParticipantsDialog = true }
                     )
                 }
 
-                // Диалог списка участников
+// Диалог списка участников
                 if (showParticipantsDialog && selectedEventMarker != null) {
                     ParticipantsDialog(
                         marker = selectedEventMarker!!,
@@ -1781,7 +2037,7 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                     )
                 }
 
-                // Диалог подтверждения удаления
+// Диалог подтверждения удаления
                 if (showDeleteConfirmDialog && selectedEventMarker != null) {
                     DeleteMarkerConfirmDialog(
                         onDismiss = { showDeleteConfirmDialog = false },
@@ -1803,7 +2059,7 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                     )
                 }
 
-                // Диалог создания маркера
+// Диалог создания маркера
                 if (showCreateMarkerDialog && createMarkerLocation != null) {
                     CreateMarkerDialog(
                         initialLocation = createMarkerLocation!!,

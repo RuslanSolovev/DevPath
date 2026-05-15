@@ -37,7 +37,8 @@ fun UserAvatar(
     size: Int = 56,
     modifier: Modifier = Modifier,
     showOnlineIndicator: Boolean = false,
-    isOnline: Boolean = false
+    isOnline: Boolean = false,
+
 ) {
     // Анимация пульсации для онлайн индикатора
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
