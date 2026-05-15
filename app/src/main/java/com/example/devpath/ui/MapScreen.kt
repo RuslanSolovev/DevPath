@@ -421,8 +421,21 @@ fun MarkerDetailDialog(
     val isCreator = marker.createdBy == currentUserId
     val isParticipant = marker.isParticipant(currentUserId)
 
+    // Состояния для анимации присоединения
+    var isJoining by remember { mutableStateOf(false) }
+    var showSuccess by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Сброс состояния при изменении маркера
+    LaunchedEffect(marker.id) {
+        isJoining = false
+        showSuccess = false
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (!isJoining) onDismiss()
+        },
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -439,20 +452,39 @@ fun MarkerDetailDialog(
                     }.copy(alpha = 0.15f)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = when (marker.type) {
-                                MarkerType.ANNOUNCEMENT -> Icons.Outlined.Campaign
-                                MarkerType.EVENT -> Icons.Outlined.Event
-                                MarkerType.DISCUSSION -> Icons.Outlined.Chat
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = when (marker.type) {
-                                MarkerType.ANNOUNCEMENT -> MaterialTheme.colorScheme.primary
-                                MarkerType.EVENT -> MaterialTheme.colorScheme.secondary
-                                MarkerType.DISCUSSION -> MaterialTheme.colorScheme.tertiary
-                            }
-                        )
+                        if (isJoining) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = when (marker.type) {
+                                    MarkerType.EVENT -> MaterialTheme.colorScheme.secondary
+                                    MarkerType.DISCUSSION -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.primary
+                                }
+                            )
+                        } else if (showSuccess) {
+                            Icon(
+                                Icons.Outlined.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = Color(0xFF4CAF50)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = when (marker.type) {
+                                    MarkerType.ANNOUNCEMENT -> Icons.Outlined.Campaign
+                                    MarkerType.EVENT -> Icons.Outlined.Event
+                                    MarkerType.DISCUSSION -> Icons.Outlined.Chat
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = when (marker.type) {
+                                    MarkerType.ANNOUNCEMENT -> MaterialTheme.colorScheme.primary
+                                    MarkerType.EVENT -> MaterialTheme.colorScheme.secondary
+                                    MarkerType.DISCUSSION -> MaterialTheme.colorScheme.tertiary
+                                }
+                            )
+                        }
                     }
                 }
                 Column(modifier = Modifier.weight(1f)) {
@@ -478,6 +510,72 @@ fun MarkerDetailDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Прогресс-бар присоединения
+                if (isJoining) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                "Присоединяемся...",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                color = MaterialTheme.colorScheme.secondary,
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Сообщение об успехе
+                if (showSuccess && !isJoining) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF4CAF50).copy(alpha = 0.15f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Outlined.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                                tint = Color(0xFF4CAF50)
+                            )
+                            Column {
+                                Text(
+                                    "Вы присоединились! 🎉",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2E7D32)
+                                )
+                                Text(
+                                    "Теперь вы можете перейти в чат",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF2E7D32).copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Описание
                 if (marker.description.isNotEmpty()) {
                     Surface(
@@ -609,7 +707,7 @@ fun MarkerDetailDialog(
                 }
 
                 // Статус участия
-                if (marker.type != MarkerType.ANNOUNCEMENT) {
+                if (marker.type != MarkerType.ANNOUNCEMENT && !isJoining && !showSuccess) {
                     val statusText = when {
                         isParticipant -> "✅ Вы участвуете"
                         marker.type == MarkerType.EVENT && marker.isFull -> "❌ Мест нет"
@@ -646,7 +744,6 @@ fun MarkerDetailDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Основные кнопки действий
                 when (marker.type) {
                     MarkerType.ANNOUNCEMENT -> {
                         if (isCreator) {
@@ -666,7 +763,8 @@ fun MarkerDetailDialog(
                     }
 
                     MarkerType.EVENT, MarkerType.DISCUSSION -> {
-                        if (isParticipant) {
+                        // Кнопка "Перейти в чат" — показывается сразу после успешного присоединения
+                        if (isParticipant || showSuccess) {
                             Button(
                                 onClick = onOpenChat,
                                 modifier = Modifier.fillMaxWidth(),
@@ -689,22 +787,43 @@ fun MarkerDetailDialog(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Выйти")
                             }
-                        } else {
+                        } else if (!isJoining && !showSuccess) {
                             val canJoin = when (marker.type) {
                                 MarkerType.EVENT -> !marker.isFull && !marker.isExpired
                                 else -> !marker.isExpired
                             }
                             if (canJoin) {
                                 Button(
-                                    onClick = onJoin,
+                                    onClick = {
+                                        isJoining = true
+                                        coroutineScope.launch {
+                                            // Вызываем присоединение
+                                            onJoin()
+                                            // Имитируем задержку для анимации
+                                            delay(1500)
+                                            isJoining = false
+                                            showSuccess = true
+                                        }
+                                    },
                                     modifier = Modifier.fillMaxWidth(),
+                                    enabled = !isJoining,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.secondary
                                     )
                                 ) {
-                                    Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Присоединиться")
+                                    if (isJoining) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onSecondary
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Присоединение...")
+                                    } else {
+                                        Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Присоединиться")
+                                    }
                                 }
                             }
                         }
@@ -729,21 +848,6 @@ fun MarkerDetailDialog(
                         }
                     }
                 }
-
-                /*
- // Кнопка жалобы (всегда снизу)
- TextButton(
-     onClick = onReport,
-     modifier = Modifier.fillMaxWidth(),
-     colors = ButtonDefaults.textButtonColors(
-         contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-     )
- ) {
-     Icon(Icons.Outlined.Flag, null, Modifier.size(16.dp))
-     Spacer(Modifier.width(4.dp))
-     Text("Пожаловаться")
- }
- */
             }
         },
         dismissButton = null,
@@ -1072,7 +1176,7 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
     val coroutineScope = rememberCoroutineScope()
     val geocodeScope = rememberCoroutineScope()
 
-    var showSettingsDialog by remember { mutableStateOf(false) }
+
     var selectedUser by remember { mutableStateOf<UserLocation?>(null) }
     var showUserDialog by remember { mutableStateOf(false) }
 
@@ -1101,6 +1205,10 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
     var isMapLoading by remember { mutableStateOf(true) }
     var cameraSetForCurrentLocation by remember { mutableStateOf(false) }
 
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var localVisibility by remember { mutableStateOf("all") }           // ← ДОБАВИТЬ
+    var localSelectedFriends by remember { mutableStateOf<List<String>>(emptyList()) }  // ← ДОБАВИТЬ
+
     fun updateCameraAddress(latitude: Double, longitude: Double) {
         geocodeJob?.cancel()
         geocodeJob = geocodeScope.launch {
@@ -1121,8 +1229,9 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
         locationPermissionState.launchPermissionRequest()
         if (locationPermissionState.status.isGranted) {
             viewModel.startLocationUpdates(currentUserId, currentUserName, null)
-            viewModel.loadNearbyUsers()
-            viewModel.loadLocationSettings(currentUserId)
+            viewModel.loadNearbyUsers(currentUserId)
+            // УБРАТЬ ЭТУ СТРОКУ: viewModel.loadLocationSettings(currentUserId)
+            // Настройки загружаются внутри startLocationUpdates с проверкой settingsLoaded
         }
     }
 
@@ -1269,6 +1378,28 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
             }
     }
 
+
+    LaunchedEffect(showSettingsDialog) {
+        if (showSettingsDialog) {
+            // Даем время на получение актуальных данных из ViewModel
+            delay(100)
+
+            // Получаем актуальные настройки через snapshotFlow
+            val currentSettings = snapshotFlow { locationSettings }.first()
+
+            println("DEBUG: SettingsDialog - открыт. visibility=${currentSettings.visibility}, friends=${currentSettings.selectedFriends}")
+
+            localVisibility = currentSettings.visibility
+
+            // Если выбран режим "друзья" и список пустой, автоматически выбираем всех друзей
+            if (currentSettings.visibility == "friends" && currentSettings.selectedFriends.isEmpty()) {
+                localSelectedFriends = friends.map { it.userId }
+            } else {
+                localSelectedFriends = currentSettings.selectedFriends.toList()
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             geocodeJob?.cancel()
@@ -1392,53 +1523,160 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                 }
 
                 // Диалог настроек
+                // Диалог настроек
                 if (showSettingsDialog) {
                     AlertDialog(
-                        onDismissRequest = { showSettingsDialog = false },
+                        onDismissRequest = {
+                            // Сохраняем изменения при закрытии (свайп назад или клик вне диалога)
+                            viewModel.updateLocationSettings(
+                                LocationSettings(
+                                    visibility = localVisibility,
+                                    selectedFriends = if (localVisibility == "friends") localSelectedFriends else emptyList()
+                                ),
+                                currentUserId
+                            )
+                            showSettingsDialog = false
+                        },
                         title = {
                             Column {
                                 Text("Кто видит ваше местоположение?", fontWeight = FontWeight.Bold)
-                                Text("Вы видите всех, кто дал разрешение", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "Вы видите всех, кто дал разрешение",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         },
                         text = {
                             Column(Modifier.fillMaxWidth()) {
                                 Spacer(Modifier.height(8.dp))
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     FilterChip(
-                                        selected = locationSettings.visibility == "all",
-                                        onClick = { viewModel.updateLocationSettings(locationSettings.copy(visibility = "all"), currentUserId) },
+                                        selected = localVisibility == "all",
+                                        onClick = {
+                                            localVisibility = "all"
+                                            localSelectedFriends = emptyList() // Очищаем список
+                                        },
                                         label = { Text("Все") }
                                     )
                                     FilterChip(
-                                        selected = locationSettings.visibility == "friends",
-                                        onClick = { viewModel.updateLocationSettings(locationSettings.copy(visibility = "friends", selectedFriends = friends.map { it.userId }), currentUserId) },
+                                        selected = localVisibility == "friends",
+                                        onClick = {
+                                            localVisibility = "friends"
+                                            // Автоматически выбираем ВСЕХ друзей при переключении
+                                            if (localSelectedFriends.isEmpty()) {
+                                                localSelectedFriends = friends.map { it.userId }
+                                            }
+                                        },
                                         label = { Text("Друзья") }
                                     )
                                     FilterChip(
-                                        selected = locationSettings.visibility == "nobody",
-                                        onClick = { viewModel.updateLocationSettings(locationSettings.copy(visibility = "nobody"), currentUserId) },
+                                        selected = localVisibility == "nobody",
+                                        onClick = {
+                                            localVisibility = "nobody"
+                                            localSelectedFriends = emptyList() // Очищаем список
+                                        },
                                         label = { Text("Никто") }
                                     )
                                 }
-                                if (locationSettings.visibility == "friends") {
+
+                                // Показываем список друзей только если выбрано "Друзья"
+                                if (localVisibility == "friends") {
                                     Spacer(Modifier.height(16.dp))
-                                    friends.forEach { friend ->
-                                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Checkbox(
-                                                checked = locationSettings.selectedFriends.contains(friend.userId),
-                                                onCheckedChange = { checked ->
-                                                    val newList = if (checked) locationSettings.selectedFriends + friend.userId else locationSettings.selectedFriends - friend.userId
-                                                    viewModel.updateLocationSettings(locationSettings.copy(selectedFriends = newList), currentUserId)
-                                                }
-                                            )
-                                            Text(friend.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "Выберите друзей, которые будут видеть вас:",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+
+                                    if (friends.isEmpty()) {
+                                        Text(
+                                            "У вас пока нет друзей",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(8.dp)
+                                        )
+                                    } else {
+                                        // Показываем всех друзей с возможностью отключить
+                                        friends.forEach { friend ->
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Checkbox(
+                                                    checked = localSelectedFriends.contains(friend.userId),
+                                                    onCheckedChange = { checked ->
+                                                        localSelectedFriends = if (checked) {
+                                                            localSelectedFriends + friend.userId
+                                                        } else {
+                                                            localSelectedFriends - friend.userId
+                                                        }
+                                                    }
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    friend.name,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        }
+
+                                        // Добавляем кнопку "Выбрать всех" / "Снять всех"
+                                        Spacer(Modifier.height(8.dp))
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            TextButton(
+                                                onClick = {
+                                                    localSelectedFriends = friends.map { it.userId }
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Выбрать всех", fontSize = 13.sp)
+                                            }
+                                            TextButton(
+                                                onClick = {
+                                                    localSelectedFriends = emptyList()
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Снять всех", fontSize = 13.sp)
+                                            }
                                         }
                                     }
                                 }
                             }
                         },
-                        confirmButton = { TextButton(onClick = { showSettingsDialog = false }) { Text("Готово") } },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                // Сохраняем изменения и закрываем
+                                viewModel.updateLocationSettings(
+                                    LocationSettings(
+                                        visibility = localVisibility,
+                                        selectedFriends = if (localVisibility == "friends") localSelectedFriends else emptyList()
+                                    ),
+                                    currentUserId
+                                )
+                                showSettingsDialog = false
+                            }) {
+                                Text("Готово")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                // Закрываем без сохранения
+                                showSettingsDialog = false
+                            }) {
+                                Text("Отмена")
+                            }
+                        },
                         shape = RoundedCornerShape(20.dp)
                     )
                 }
@@ -1500,8 +1738,20 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                         onDismiss = { selectedEventMarker = null },
                         onJoin = {
                             coroutineScope.launch {
-                                viewModel.joinMarker(selectedEventMarker!!.id)
-                                selectedEventMarker = null
+                                val markerId = selectedEventMarker!!.id
+                                // Присоединяемся к маркеру
+                                viewModel.joinMarker(markerId)
+
+                                // Даём время на обновление данных в БД
+                                delay(2000)
+
+                                // Загружаем обновлённый маркер (теперь пользователь в participants)
+                                val updatedMarker = viewModel.getMarker(markerId)
+                                if (updatedMarker != null) {
+                                    // Обновляем selectedEventMarker — диалог перерисуется с новыми данными
+                                    selectedEventMarker = updatedMarker
+                                }
+                                // НЕ закрываем диалог!
                             }
                         },
                         onLeave = {
@@ -1561,9 +1811,14 @@ fun MapScreen(navController: NavHostController, mapView: MapView) {
                         onDismiss = { showCreateMarkerDialog = false; createMarkerLocation = null },
                         onCreate = { marker ->
                             coroutineScope.launch {
-                                viewModel.createMarker(marker)
+                                val createdMarkerId = viewModel.createMarker(marker)
+                                // Обновляем список маркеров
+                                currentLocation?.let { loc ->
+                                    viewModel.loadNearbyMarkers(currentUserId, loc.latitude, loc.longitude)
+                                }
                                 Toast.makeText(context, "Метка создана! 🎉", Toast.LENGTH_SHORT).show()
-                                showCreateMarkerDialog = false; createMarkerLocation = null
+                                showCreateMarkerDialog = false
+                                createMarkerLocation = null
                             }
                         }
                     )

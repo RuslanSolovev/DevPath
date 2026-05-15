@@ -156,7 +156,13 @@ fun ChatItemModern(
     var friendName by remember { mutableStateOf("") }
     var isFriendOnline by remember { mutableStateOf(false) }
 
-    // Загружаем данные друга только при изменении chatId
+    // Для community чатов — загружаем аватар маркера
+    var chatAvatarJson by remember { mutableStateOf<String?>(null) }
+    var markerType by remember { mutableStateOf<String?>(null) }
+    var markerColor by remember { mutableStateOf<String?>(null) }
+    var markerEmoji by remember { mutableStateOf<String?>(null) }
+
+    // Загружаем данные при изменении chatId
     LaunchedEffect(chat.chatId) {
         if (chat.type == "personal") {
             val friendId = chat.participants.firstOrNull { it != currentUserId }
@@ -166,6 +172,27 @@ fun ChatItemModern(
                 friendName = friend?.optJSONObject("name")?.optString("S", "") ?: chat.name
                 val lastSeen = friend?.optJSONObject("last_seen")?.optString("S")?.toLongOrNull() ?: 0
                 isFriendOnline = System.currentTimeMillis() - lastSeen < 120_000
+            }
+        } else {
+            // Для community чатов — получаем аватар из самого чата
+            val chatData = ydbRepository.getChat(chat.chatId)
+            chatAvatarJson = chatData?.optJSONObject("chat_avatar")?.optString("S")
+
+            // Парсим JSON аватара
+            if (chatAvatarJson != null) {
+                try {
+                    val avatarObj = org.json.JSONObject(chatAvatarJson!!)
+                    markerType = avatarObj.optString("marker_type", "")
+                    markerColor = avatarObj.optString("color", "")
+                    markerEmoji = avatarObj.optString("emoji", "")
+                } catch (e: Exception) {
+                    // Если не удалось распарсить — используем значения по умолчанию
+                }
+            }
+
+            // Если имя чата пустое — загружаем из YDB
+            if (chat.name.isEmpty() && chatData != null) {
+                friendName = chatData.optJSONObject("name")?.optString("S", "") ?: "Групповой чат"
             }
         }
     }
@@ -179,6 +206,7 @@ fun ChatItemModern(
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(56.dp)) {
                 when {
+                    // Личный чат — аватар друга
                     chat.type == "personal" -> {
                         UserAvatar(
                             avatarUrl = friendAvatarUrl,
@@ -188,6 +216,24 @@ fun ChatItemModern(
                             isOnline = isFriendOnline
                         )
                     }
+                    // Community чат с аватаром маркера
+                    markerColor != null -> {
+                        val color = try {
+                            android.graphics.Color.parseColor(markerColor)
+                        } catch (e: Exception) {
+                            android.graphics.Color.parseColor("#FF9800")
+                        }
+                        Box(
+                            modifier = Modifier.fillMaxSize().clip(CircleShape).background(Color(color)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = markerEmoji ?: "🎉",
+                                fontSize = 28.sp
+                            )
+                        }
+                    }
+                    // Community чат без аватара (fallback)
                     else -> {
                         Box(
                             modifier = Modifier.fillMaxSize().clip(CircleShape).background(
@@ -209,7 +255,7 @@ fun ChatItemModern(
                         text = when {
                             chat.type == "personal" && friendName.isNotEmpty() -> friendName
                             chat.name.isNotEmpty() -> chat.name
-                            else -> "Личный чат"
+                            else -> "Групповой чат"
                         },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -219,6 +265,7 @@ fun ChatItemModern(
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     Spacer(Modifier.width(8.dp))
+
                     Text(
                         text = formatChatTime(chat.lastMessageTime),
                         style = MaterialTheme.typography.labelSmall,

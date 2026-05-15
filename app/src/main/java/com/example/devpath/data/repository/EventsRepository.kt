@@ -23,6 +23,67 @@ class EventsRepository @Inject constructor(
     private val markersTable = "markers_doc"
     private val scope = CoroutineScope(Dispatchers.IO)
 
+    // Цвета для аватаров чатов
+    private val eventColor = "#FF9800"      // Оранжевый для EVENT
+    private val discussionColor = "#4CAF50"  // Зелёный для DISCUSSION
+
+    init {
+        // Запускаем периодическую очистку истёкших маркеров
+        scope.launch {
+            while (true) {
+                delay(60_000) // Проверяем каждую минуту
+                cleanExpiredMarkers()
+            }
+        }
+    }
+
+    /**
+     * Автоматически удаляет истёкшие маркеры и их чаты
+     */
+    private suspend fun cleanExpiredMarkers() {
+        try {
+            val body = JSONObject().apply {
+                put("TableName", markersTable)
+                put("FilterExpression", "#status = :active")
+                put("ExpressionAttributeNames", JSONObject().apply { put("#status", "status") })
+                put("ExpressionAttributeValues", JSONObject().apply {
+                    put(":active", JSONObject().put("S", "active"))
+                })
+                put("Limit", 100)
+            }
+            val result = ydbRepository.executeSignedRequest("Scan", body)
+            val items = result?.optJSONArray("Items") ?: JSONArray()
+
+            for (i in 0 until items.length()) {
+                val json = items.getJSONObject(i)
+                val marker = mapJsonToMarker(json)
+
+                if (marker != null && marker.isExpired) {
+                    println("DEBUG: cleanExpiredMarkers - удаляем истёкший маркер: ${marker.id}")
+
+                    // Удаляем чат если есть
+                    if (marker.chatId != null && marker.chatId.isNotEmpty() && marker.chatId != "auto") {
+                        ydbRepository.deleteChat(marker.chatId)
+                        println("DEBUG: cleanExpiredMarkers - чат удалён: ${marker.chatId}")
+                    }
+
+                    // Удаляем сам маркер
+                    val deleteKey = JSONObject().apply {
+                        put("marker_id", JSONObject().put("S", marker.id))
+                    }
+                    val deleteBody = JSONObject().apply {
+                        put("TableName", markersTable)
+                        put("Key", deleteKey)
+                    }
+                    ydbRepository.executeSignedRequest("DeleteItem", deleteBody)
+                    println("DEBUG: cleanExpiredMarkers - маркер удалён: ${marker.id}")
+                }
+            }
+        } catch (e: Exception) {
+            println("ERROR: cleanExpiredMarkers - ${e.message}")
+        }
+    }
+
     suspend fun initMarkersTable() {
         val body = JSONObject().apply {
             put("TableName", markersTable)
@@ -68,10 +129,27 @@ class EventsRepository @Inject constructor(
                         val json = items.getJSONObject(i)
                         val marker = mapJsonToMarker(json)
                         if (marker != null && !marker.isExpired) {
+                            // Применяем фильтр видимости
                             when (marker.visibility) {
-                                "private" -> if (marker.createdBy == userId) marker else null
-                                "friends" -> if (marker.createdBy == userId || marker.participants.contains(userId)) marker else null
-                                "public" -> marker
+                                "public" -> marker // Видно всем
+                                "friends" -> {
+                                    // Видно друзьям или создателю
+                                    if (marker.createdBy == userId) {
+                                        marker
+                                    } else {
+                                        // Проверяем, друзья ли мы с создателем
+                                        val creatorFriends = ydbRepository.getUserFriends(marker.createdBy)
+                                        if (creatorFriends.contains(userId) || marker.participants.contains(userId)) {
+                                            marker
+                                        } else {
+                                            null
+                                        }
+                                    }
+                                }
+                                "private" -> {
+                                    // Видно только создателю
+                                    if (marker.createdBy == userId) marker else null
+                                }
                                 else -> null
                             }
                         } else null
@@ -93,6 +171,18 @@ class EventsRepository @Inject constructor(
         val participantsArray = JSONArray()
         participantsArray.put(marker.createdBy)
 
+        var chatId: String? = null
+        var chatAvatarColor: String? = null
+
+        if (marker.type == MarkerType.EVENT || marker.type == MarkerType.DISCUSSION) {
+            chatId = UUID.randomUUID().toString()
+            chatAvatarColor = when (marker.type) {
+                MarkerType.EVENT -> eventColor
+                MarkerType.DISCUSSION -> discussionColor
+                else -> null
+            }
+        }
+
         val item = JSONObject().apply {
             put("marker_id", JSONObject().put("S", markerId))
             put("type", JSONObject().put("S", marker.type.name))
@@ -109,6 +199,8 @@ class EventsRepository @Inject constructor(
             put("status", JSONObject().put("S", "active"))
             marker.endsAt?.let { put("ends_at", JSONObject().put("S", it.seconds.toString())) }
             marker.participantLimit?.let { put("participant_limit", JSONObject().put("N", it.toString())) }
+            chatId?.let { put("chat_id", JSONObject().put("S", it)) }
+            chatAvatarColor?.let { put("chat_avatar_color", JSONObject().put("S", it)) }
         }
 
         val body = JSONObject().apply {
@@ -117,28 +209,103 @@ class EventsRepository @Inject constructor(
         }
         ydbRepository.executeSignedRequest("PutItem", body)
 
-        // Создаём чат для EVENT и DISCUSSION
-        if (marker.type == MarkerType.EVENT || marker.type == MarkerType.DISCUSSION) {
-            val chatId = UUID.randomUUID().toString()
-            ydbRepository.createChat(chatId, "community", listOf(marker.createdBy), marker.title, marker.createdBy)
+        if (chatId != null) {
+            ydbRepository.createChat(
+                chatId = chatId,
+                type = "community",
+                participants = listOf(marker.createdBy),
+                name = marker.title,
+                createdBy = marker.createdBy
+            )
+
+            val chatAvatar = JSONObject().apply {
+                put("type", "marker")
+                put("marker_type", marker.type.name)
+                put("color", chatAvatarColor)
+                put("emoji", when (marker.type) {
+                    MarkerType.EVENT -> "🎉"
+                    MarkerType.DISCUSSION -> "💬"
+                    else -> "📢"
+                })
+            }
+
             ydbRepository.executeSignedRequest("UpdateItem", JSONObject().apply {
-                put("TableName", markersTable)
-                put("Key", JSONObject().apply { put("marker_id", JSONObject().put("S", markerId)) })
-                put("UpdateExpression", "SET chat_id = :chatId")
-                put("ExpressionAttributeValues", JSONObject().apply { put(":chatId", JSONObject().put("S", chatId)) })
+                put("TableName", "chats_doc")
+                put("Key", JSONObject().apply { put("chat_id", JSONObject().put("S", chatId)) })
+                put("UpdateExpression", "SET chat_avatar = :avatar")
+                put("ExpressionAttributeValues", JSONObject().apply {
+                    put(":avatar", JSONObject().put("S", chatAvatar.toString()))
+                })
             })
+
+            println("DEBUG: createMarker - создан чат: $chatId, цвет: $chatAvatarColor")
         }
 
         return markerId
     }
 
     suspend fun joinMarker(markerId: String, userId: String) {
+        // 1. Добавляем пользователя в participants маркера
         ydbRepository.executeSignedRequest("UpdateItem", JSONObject().apply {
             put("TableName", markersTable)
             put("Key", JSONObject().apply { put("marker_id", JSONObject().put("S", markerId)) })
             put("UpdateExpression", "ADD participants :userId")
-            put("ExpressionAttributeValues", JSONObject().apply { put(":userId", JSONObject().put("SS", JSONArray(listOf(userId)))) })
+            put("ExpressionAttributeValues", JSONObject().apply {
+                put(":userId", JSONObject().put("SS", JSONArray(listOf(userId))))
+            })
         })
+
+        // 2. Добавляем пользователя в чат маркера
+        val marker = getMarker(markerId)
+        if (marker != null && marker.chatId != null && marker.chatId.isNotEmpty()) {
+            // Проверяем, существует ли чат
+            val existingChat = ydbRepository.getChat(marker.chatId)
+            if (existingChat != null) {
+                // Чат существует — добавляем пользователя
+                ydbRepository.executeSignedRequest("UpdateItem", JSONObject().apply {
+                    put("TableName", "chats_doc")
+                    put("Key", JSONObject().apply { put("chat_id", JSONObject().put("S", marker.chatId)) })
+                    put("UpdateExpression", "ADD participants :userId")
+                    put("ExpressionAttributeValues", JSONObject().apply {
+                        put(":userId", JSONObject().put("SS", JSONArray(listOf(userId))))
+                    })
+                })
+            } else {
+                // Чат был удалён — пересоздаём его со всеми участниками
+                ydbRepository.createChat(
+                    chatId = marker.chatId,
+                    type = "community",
+                    participants = marker.participants,
+                    name = marker.title,
+                    createdBy = marker.createdBy
+                )
+                // Восстанавливаем аватар
+                val chatAvatar = JSONObject().apply {
+                    put("type", "marker")
+                    put("marker_type", marker.type.name)
+                    put("color", when (marker.type) {
+                        MarkerType.EVENT -> eventColor
+                        MarkerType.DISCUSSION -> discussionColor
+                        else -> "#FF9800"
+                    })
+                    put("emoji", when (marker.type) {
+                        MarkerType.EVENT -> "🎉"
+                        MarkerType.DISCUSSION -> "💬"
+                        else -> "📢"
+                    })
+                }
+                ydbRepository.executeSignedRequest("UpdateItem", JSONObject().apply {
+                    put("TableName", "chats_doc")
+                    put("Key", JSONObject().apply { put("chat_id", JSONObject().put("S", marker.chatId)) })
+                    put("UpdateExpression", "SET chat_avatar = :avatar")
+                    put("ExpressionAttributeValues", JSONObject().apply {
+                        put(":avatar", JSONObject().put("S", chatAvatar.toString()))
+                    })
+                })
+                println("DEBUG: joinMarker - чат пересоздан: ${marker.chatId}")
+            }
+            println("DEBUG: joinMarker - пользователь $userId добавлен в чат ${marker.chatId}")
+        }
     }
 
     suspend fun leaveMarker(markerId: String, userId: String) {
@@ -146,8 +313,23 @@ class EventsRepository @Inject constructor(
             put("TableName", markersTable)
             put("Key", JSONObject().apply { put("marker_id", JSONObject().put("S", markerId)) })
             put("UpdateExpression", "DELETE participants :userId")
-            put("ExpressionAttributeValues", JSONObject().apply { put(":userId", JSONObject().put("SS", JSONArray(listOf(userId)))) })
+            put("ExpressionAttributeValues", JSONObject().apply {
+                put(":userId", JSONObject().put("SS", JSONArray(listOf(userId))))
+            })
         })
+
+        val marker = getMarker(markerId)
+        if (marker != null && marker.chatId != null && marker.chatId.isNotEmpty()) {
+            ydbRepository.executeSignedRequest("UpdateItem", JSONObject().apply {
+                put("TableName", "chats_doc")
+                put("Key", JSONObject().apply { put("chat_id", JSONObject().put("S", marker.chatId)) })
+                put("UpdateExpression", "DELETE participants :userId")
+                put("ExpressionAttributeValues", JSONObject().apply {
+                    put(":userId", JSONObject().put("SS", JSONArray(listOf(userId))))
+                })
+            })
+            println("DEBUG: leaveMarker - пользователь $userId удалён из чата ${marker.chatId}")
+        }
     }
 
     suspend fun reportMarker(markerId: String, userId: String, reason: String) {
@@ -176,19 +358,16 @@ class EventsRepository @Inject constructor(
         return mapJsonToMarker(item)
     }
 
-    // ✅ НОВЫЙ МЕТОД: Удаление маркера и связанного чата
     suspend fun deleteMarker(markerId: String, chatId: String?): Boolean {
         return try {
             println("DEBUG: deleteMarker - удаляем маркер: $markerId, чат: $chatId")
 
-            // 1. Удаляем связанный чат, если он существует
             if (chatId != null && chatId.isNotEmpty() && chatId != "auto") {
                 println("DEBUG: deleteMarker - удаляем чат: $chatId")
-                val chatDeleted = ydbRepository.deleteChat(chatId)
-                println("DEBUG: deleteMarker - чат удалён: $chatDeleted")
+                ydbRepository.deleteChat(chatId)
+                println("DEBUG: deleteMarker - чат удалён")
             }
 
-            // 2. Удаляем саму метку
             val key = JSONObject().apply {
                 put("marker_id", JSONObject().put("S", markerId))
             }

@@ -22,10 +22,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -34,7 +32,6 @@ import com.example.devpath.data.repository.LocalThemeRepository
 import com.example.devpath.data.repository.YdbRepository
 import com.example.devpath.ui.components.UserAvatar
 import com.example.devpath.ui.theme.AppTheme
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
@@ -43,10 +40,28 @@ import com.example.devpath.data.repository.PracticeRepository
 import com.example.devpath.data.repository.QuizRepository
 import com.example.devpath.ui.navigation.BottomNavigationScreen
 import org.json.JSONArray
-import org.json.JSONObject
 import com.example.devpath.utils.Config
 import com.yandex.mapkit.mapview.MapView
-import java.util.UUID
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import kotlinx.coroutines.delay
 
 enum class MainTab2(val title: String) {
     HOME("Главная"),
@@ -60,6 +75,7 @@ fun MainScreen(mapView: MapView? = null) {
     val ydbRepository = remember { YdbRepository() }
 
     var isAuthenticated by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(true) }
     var currentUserId by remember { mutableStateOf("") }
     var currentUserName by remember { mutableStateOf("") }
     var currentUserEmail by remember { mutableStateOf("") }
@@ -68,7 +84,21 @@ fun MainScreen(mapView: MapView? = null) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // Анимация для прогресс-бара загрузки
+    val infiniteTransition = rememberInfiniteTransition(label = "loading")
+    val animatedProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "progress"
+    )
+
+    // Проверка авторизации при запуске
     LaunchedEffect(Unit) {
+        delay(300)
         val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
         val userId = prefs.getString("user_id", null)
         if (userId != null) {
@@ -78,8 +108,102 @@ fun MainScreen(mapView: MapView? = null) {
             currentUserAvatar = prefs.getString("user_avatar", "") ?: ""
             isAuthenticated = true
         }
+        delay(500) // Минимальное время показа загрузки
+        isLoading = false
     }
 
+    // ==================== ЭКРАН ЗАГРУЗКИ ====================
+    if (isLoading) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                // Анимированный логотип
+                Box(
+                    modifier = Modifier.size(100.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Внешнее кольцо
+                    CircularProgressIndicator(
+                        progress = animatedProgress,
+                        modifier = Modifier.size(100.dp),
+                        strokeWidth = 4.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    // Внутреннее кольцо (вращается в обратную сторону)
+                    CircularProgressIndicator(
+                        progress = 1f - animatedProgress,
+                        modifier = Modifier.size(70.dp),
+                        strokeWidth = 3.dp,
+                        color = MaterialTheme.colorScheme.secondary,
+                        trackColor = Color.Transparent
+                    )
+                    // Иконка в центре
+                    Surface(
+                        modifier = Modifier.size(48.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("🚀", fontSize = 24.sp)
+                        }
+                    }
+                }
+
+                // Текст
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "DevPath",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "Загрузка...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Прогресс-бар
+                Box(
+                    modifier = Modifier
+                        .width(200.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(animatedProgress)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.secondary
+                                    )
+                                )
+                            )
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    // ==================== АВТОРИЗАЦИЯ ====================
     if (!isAuthenticated) {
         AuthScreen(
             ydbRepository = ydbRepository,
@@ -89,6 +213,7 @@ fun MainScreen(mapView: MapView? = null) {
             }
         )
     } else {
+        // ==================== ОСНОВНОЙ ЭКРАН ====================
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
@@ -189,7 +314,6 @@ fun MainScreen(mapView: MapView? = null) {
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Оборачиваем в провайдер вместо передачи параметра
                 val viewModelStoreOwner = checkNotNull(LocalViewModelStoreOwner.current) {
                     "No ViewModelStoreOwner was provided via LocalViewModelStoreOwner"
                 }
@@ -243,7 +367,6 @@ fun MainScreen(mapView: MapView? = null) {
                             )
                         }
 
-                        // ✅ МАРШРУТЫ ВКЛАДОК
                         composable(
                             route = "tabs/{initialTab}",
                             arguments = listOf(navArgument("initialTab") { type = NavType.StringType })
@@ -269,7 +392,6 @@ fun MainScreen(mapView: MapView? = null) {
                             )
                         }
 
-                        // ✅ МАРШРУТЫ УРОКОВ
                         composable(
                             route = "lesson/{lessonId}",
                             arguments = listOf(navArgument("lessonId") { type = NavType.StringType })
@@ -287,7 +409,6 @@ fun MainScreen(mapView: MapView? = null) {
                             )
                         }
 
-                        // ✅ МАРШРУТЫ ПРАКТИКИ
                         composable(
                             route = "practice/{taskId}",
                             arguments = listOf(navArgument("taskId") { type = NavType.StringType })
@@ -300,7 +421,6 @@ fun MainScreen(mapView: MapView? = null) {
                             )
                         }
 
-                        // ✅ МАРШРУТЫ ВИКТОРИН
                         composable(
                             route = "quiz/question/{questionId}",
                             arguments = listOf(navArgument("questionId") { type = NavType.StringType })
@@ -313,7 +433,6 @@ fun MainScreen(mapView: MapView? = null) {
                             )
                         }
 
-                        // ✅ ОБЩИЙ ТЕСТ
                         composable("quiz/general_test") {
                             GeneralTestScreenContent(
                                 navController = navController,
@@ -327,7 +446,6 @@ fun MainScreen(mapView: MapView? = null) {
                             )
                         }
 
-                        // ✅ РЕЗУЛЬТАТЫ ТЕСТА
                         composable(
                             route = "quiz/test_results/{attemptId}",
                             arguments = listOf(navArgument("attemptId") { type = NavType.LongType })
@@ -352,7 +470,6 @@ fun MainScreen(mapView: MapView? = null) {
                             )
                         }
 
-                        // ✅ ДЕТАЛЬНЫЙ РАЗБОР ТЕСТА
                         composable(
                             route = "quiz/test_detail/{attemptId}",
                             arguments = listOf(navArgument("attemptId") { type = NavType.LongType })
@@ -378,10 +495,7 @@ fun MainScreen(mapView: MapView? = null) {
                                 onBack = { navController.popBackStack() },
                                 onLogout = {
                                     coroutineScope.launch {
-                                        val prefs = context.getSharedPreferences(
-                                            "user_prefs",
-                                            android.content.Context.MODE_PRIVATE
-                                        )
+                                        val prefs = context.getSharedPreferences("user_prefs", android.content.Context.MODE_PRIVATE)
                                         prefs.edit().clear().apply()
                                         isAuthenticated = false
                                         currentUserId = ""
@@ -435,9 +549,7 @@ fun MainScreen(mapView: MapView? = null) {
                             route = "chat_detail/{chatId}/{friendId}",
                             arguments = listOf(
                                 navArgument("chatId") { type = NavType.StringType },
-                                navArgument("friendId") {
-                                    type = NavType.StringType; defaultValue = ""
-                                }
+                                navArgument("friendId") { type = NavType.StringType; defaultValue = "" }
                             )
                         ) { backStackEntry ->
                             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
@@ -464,9 +576,7 @@ fun MainScreen(mapView: MapView? = null) {
 
                         composable(
                             route = "fullscreen_image/{imageUrl}",
-                            arguments = listOf(navArgument("imageUrl") {
-                                type = NavType.StringType; defaultValue = ""
-                            })
+                            arguments = listOf(navArgument("imageUrl") { type = NavType.StringType; defaultValue = "" })
                         ) { backStackEntry ->
                             val encodedUrl = backStackEntry.arguments?.getString("imageUrl") ?: ""
                             val imageUrl = Uri.decode(encodedUrl)

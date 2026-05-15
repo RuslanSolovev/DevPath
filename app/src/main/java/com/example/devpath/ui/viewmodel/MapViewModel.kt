@@ -43,6 +43,9 @@ class MapViewModel @Inject constructor(
     private val _nearbyMarkers = MutableStateFlow<List<MapMarker>>(emptyList())
     val nearbyMarkers: StateFlow<List<MapMarker>> = _nearbyMarkers.asStateFlow()
 
+    // Флаг для отслеживания первой загрузки настроек
+    private var settingsLoaded = false
+
     init {
         viewModelScope.launch {
             locationRepository.currentLocation.collect { location ->
@@ -88,14 +91,22 @@ class MapViewModel @Inject constructor(
                 _currentUserProfile.value?.name ?: userName,
                 _currentUserProfile.value?.avatarUrl
             )
+
+            // Загружаем настройки только при первом запуске
+            if (!settingsLoaded) {
+                loadLocationSettings(userId)
+                settingsLoaded = true
+            }
         }
     }
 
-    fun loadNearbyUsers() {
+    fun loadNearbyUsers(currentUserId: String) {
         viewModelScope.launch {
             while (true) {
                 try {
-                    _nearbyUsers.value = locationRepository.getNearbyUsers()
+                    val users = locationRepository.getNearbyUsers(currentUserId)
+                    println("DEBUG: MapViewModel - загружено nearby users: ${users.size}")
+                    _nearbyUsers.value = users
                 } catch (e: Exception) {
                     println("DEBUG: MapViewModel - ошибка загрузки nearby users: ${e.message}")
                 }
@@ -140,7 +151,6 @@ class MapViewModel @Inject constructor(
         return eventsRepository.getMarker(markerId)
     }
 
-    // ✅ НОВЫЙ МЕТОД: Удаление маркера
     suspend fun deleteMarker(markerId: String, chatId: String?) {
         eventsRepository.deleteMarker(markerId, chatId)
     }
@@ -163,15 +173,25 @@ class MapViewModel @Inject constructor(
 
     fun loadLocationSettings(userId: String) {
         viewModelScope.launch {
-            val settings = locationRepository.loadLocationSettings(userId)
-            _locationSettings.value = settings
+            try {
+                val settings = locationRepository.loadLocationSettings(userId)
+                println("DEBUG: MapViewModel - загружены настройки: visibility=${settings.visibility}, friends=${settings.selectedFriends}")
+                _locationSettings.value = settings
+            } catch (e: Exception) {
+                println("DEBUG: MapViewModel - ошибка загрузки настроек: ${e.message}")
+            }
         }
     }
 
     fun updateLocationSettings(settings: LocationSettings, userId: String) {
         viewModelScope.launch {
-            locationRepository.saveLocationSettings(userId, settings)
-            _locationSettings.value = settings
+            try {
+                locationRepository.saveLocationSettings(userId, settings)
+                _locationSettings.value = settings
+                println("DEBUG: MapViewModel - сохранены настройки: visibility=${settings.visibility}, friends=${settings.selectedFriends}")
+            } catch (e: Exception) {
+                println("DEBUG: MapViewModel - ошибка сохранения настроек: ${e.message}")
+            }
         }
     }
 

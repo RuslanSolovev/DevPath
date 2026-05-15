@@ -44,6 +44,11 @@ class LocationRepository @Inject constructor(
     private val _locationSettings = MutableStateFlow<LocationSettings>(LocationSettings())
     val locationSettings: StateFlow<LocationSettings> = _locationSettings
 
+    // Кэш настроек видимости с временем жизни
+    private val visibilityCache = mutableMapOf<String, LocationSettings>()
+    private var cacheTimestamp = 0L
+    private val cacheLifetime = 30_000L // 30 секунд
+
     suspend fun initLocationTables() {
         ydbRepository.initTable(locationsTable, "user_id")
         ydbRepository.initTable(settingsTable, "user_id")
@@ -84,8 +89,7 @@ class LocationRepository @Inject constructor(
         ydbRepository.executeSignedRequest("PutItem", body)
     }
 
-
-    suspend fun getNearbyUsers(): List<UserLocation> {
+    suspend fun getNearbyUsers(currentUserId: String): List<UserLocation> {
         val body = JSONObject().apply {
             put("TableName", locationsTable)
             put("Limit", 200)
@@ -93,11 +97,13 @@ class LocationRepository @Inject constructor(
         val result = ydbRepository.executeSignedRequest("Scan", body)
         val items = result?.optJSONArray("Items") ?: JSONArray()
 
-        return (0 until items.length()).mapNotNull { i ->
+        val allUsers = (0 until items.length()).mapNotNull { i ->
             val json = items.getJSONObject(i)
             val lastUpdated = json.optJSONObject("last_updated")?.optString("S")?.toLongOrNull() ?: 0
+            val userId = json.optJSONObject("user_id")?.optString("S") ?: return@mapNotNull null
+
             UserLocation(
-                userId = json.optJSONObject("user_id")?.optString("S") ?: return@mapNotNull null,
+                userId = userId,
                 name = json.optJSONObject("name")?.optString("S") ?: "",
                 avatarUrl = json.optJSONObject("avatar_url")?.optString("S")?.ifEmpty { null },
                 latitude = json.optJSONObject("latitude")?.optString("N")?.toDoubleOrNull() ?: 0.0,
@@ -106,11 +112,80 @@ class LocationRepository @Inject constructor(
                 lastUpdated = lastUpdated
             )
         }
+
+        // Инвалидируем кэш если прошло больше cacheLifetime
+        if (System.currentTimeMillis() - cacheTimestamp > cacheLifetime) {
+            visibilityCache.clear()
+            cacheTimestamp = System.currentTimeMillis()
+        }
+
+        // Применяем фильтр видимости
+        val filteredUsers = allUsers.filter { user ->
+            if (user.userId == currentUserId) return@filter false // Не показываем себя
+
+            // Получаем настройки из кэша или загружаем
+            val settings = getLocationSettingsCached(user.userId)
+
+            println("DEBUG: getNearbyUsers - userId=${user.userId}, visibility=${settings.visibility}, selectedFriends=${settings.selectedFriends}")
+
+            when (settings.visibility) {
+                "all" -> true
+                "nobody" -> false
+                "friends" -> {
+                    // Проверяем, выбран ли currentUserId в selectedFriends этого пользователя
+                    val isSelected = settings.selectedFriends.contains(currentUserId)
+                    println("DEBUG: getNearbyUsers - $currentUserId в selectedFriends у ${user.userId} = $isSelected")
+                    isSelected
+                }
+                else -> false
+            }
+        }
+
+        println("DEBUG: getNearbyUsers - всего пользователей: ${allUsers.size}, после фильтра: ${filteredUsers.size}")
+
+        return filteredUsers
+    }
+
+    // Получение настроек с кэшированием
+    private suspend fun getLocationSettingsCached(userId: String): LocationSettings {
+        // Проверяем кэш
+        visibilityCache[userId]?.let {
+            println("DEBUG: getLocationSettingsCached - из кэша: $userId -> ${it.visibility}")
+            return it
+        }
+
+        // Загружаем из БД
+        val settings = loadLocationSettingsInternal(userId)
+
+        // Сохраняем в кэш
+        visibilityCache[userId] = settings
+        println("DEBUG: getLocationSettingsCached - загружено: $userId -> ${settings.visibility}")
+
+        return settings
+    }
+
+    // Внутренний метод загрузки настроек (без обновления StateFlow)
+    private suspend fun loadLocationSettingsInternal(userId: String): LocationSettings {
+        val key = JSONObject().apply { put("user_id", JSONObject().put("S", userId)) }
+        val body = JSONObject().apply { put("TableName", settingsTable); put("Key", key) }
+        val result = ydbRepository.executeSignedRequest("GetItem", body)
+        val item = result?.optJSONObject("Item")
+
+        if (item == null) {
+            println("DEBUG: loadLocationSettingsInternal - настройки не найдены для $userId")
+            return LocationSettings()
+        }
+
+        val friendsArray = item.optJSONObject("selected_friends")?.optJSONArray("SS") ?: JSONArray()
+        val friends = (0 until friendsArray.length()).map { friendsArray.getString(it) }
+
+        return LocationSettings(
+            visibility = item.optJSONObject("visibility")?.optString("S") ?: "all",
+            selectedFriends = friends
+        )
     }
 
     suspend fun saveLocationSettings(userId: String, settings: LocationSettings) {
-        _locationSettings.value = settings
-
         val selectedFriendsArray = JSONArray()
         settings.selectedFriends.forEach { selectedFriendsArray.put(it) }
 
@@ -125,20 +200,30 @@ class LocationRepository @Inject constructor(
             put("Item", item)
         }
         ydbRepository.executeSignedRequest("PutItem", body)
+
+        // Обновляем кэш и StateFlow
+        visibilityCache[userId] = settings
+        _locationSettings.value = settings
+
+        println("DEBUG: LocationRepository - сохранены настройки: visibility=${settings.visibility}")
     }
 
+    // Публичный метод для загрузки настроек текущего пользователя
     suspend fun loadLocationSettings(userId: String): LocationSettings {
-        val key = JSONObject().apply { put("user_id", JSONObject().put("S", userId)) }
-        val body = JSONObject().apply { put("TableName", settingsTable); put("Key", key) }
-        val result = ydbRepository.executeSignedRequest("GetItem", body)
-        val item = result?.optJSONObject("Item") ?: return LocationSettings().also { _locationSettings.value = it }
+        val settings = loadLocationSettingsInternal(userId)
 
-        val friendsArray = item.optJSONObject("selected_friends")?.optJSONArray("SS") ?: JSONArray()
-        val friends = (0 until friendsArray.length()).map { friendsArray.getString(it) }
+        // Обновляем кэш и StateFlow
+        visibilityCache[userId] = settings
+        _locationSettings.value = settings
 
-        return LocationSettings(
-            visibility = item.optJSONObject("visibility")?.optString("S") ?: "all",
-            selectedFriends = friends
-        ).also { _locationSettings.value = it }
+        println("DEBUG: LocationRepository - загружены настройки для $userId: visibility=${settings.visibility}")
+
+        return settings
+    }
+
+    // Принудительная очистка кэша
+    fun clearVisibilityCache() {
+        visibilityCache.clear()
+        cacheTimestamp = 0
     }
 }
